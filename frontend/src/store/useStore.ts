@@ -1,0 +1,512 @@
+import { create } from 'zustand'
+import type {
+  Account,
+  Bot,
+  BotRole,
+  DocRelation,
+  DocStatus,
+  DocType,
+  Executor,
+  Machine,
+  Priority,
+  Product,
+  Project,
+  RelType,
+  Requirement,
+  Task,
+  TaskKind,
+  TaskStatus,
+  WikiDoc,
+} from '../types'
+import { seedBots, seedRequirements, seedTasks } from '../mock/data'
+import { seedDocs } from '../mock/docs'
+import { seedProducts } from '../mock/products'
+import { seedAccounts, seedExecutors, seedMachines, seedProjects } from '../mock/accounts'
+
+/** 顶层导航视图 */
+export type View = 'dashboard' | 'requirements' | 'wiki' | 'kanban' | 'workforce' | 'account'
+
+const nextVersion = (v: string) => `v${parseInt(v.replace(/^v/, ''), 10) + 1}`
+
+// 机器人执行任务时会滚动输出的模拟日志片段
+const WORK_LOG_SNIPPETS = [
+  '分析任务上下文与约束…',
+  '拆解为可执行子步骤',
+  '调用工具读取相关文件',
+  '生成初版实现',
+  '自检并修正边界情况',
+  '运行验证，观察输出',
+  '整理交付物与说明',
+]
+
+let uid = 1000
+const nextId = (p: string) => `${p}-${uid++}`
+
+interface State {
+  // 账户与项目
+  accounts: Account[]
+  currentAccountId: string
+  projects: Project[]
+  currentProjectId: string
+  machines: Machine[]
+  executors: Executor[]
+
+  products: Product[]
+  requirements: Requirement[]
+  tasks: Task[]
+  bots: Bot[]
+  docs: WikiDoc[]
+  simRunning: boolean
+
+  // 账户与项目
+  switchAccount: (accountId: string) => void
+  addMemberAccount: (input: { name: string; email: string; memberRole: string }) => void
+  switchProject: (projectId: string) => void
+  addProject: (input: { name: string; description: string }) => void
+  addProduct: (input: { name: string; description: string; currentVersion: string }) => string
+  /** 「绑定电脑」：一台 agent 接入，登记机器并探测出默认执行器 */
+  enrollMachine: (input: { name: string; os: string }) => void
+
+  // 导航（提到 store 以支持跨模块跳转，如从需求跳到 Wiki 对应文档）
+  view: View
+  setView: (v: View) => void
+  /** 请求 Wiki 定位到某产品的某文档 */
+  focusDoc: { productId: string; slug: string } | null
+  openDoc: (productId: string, slug: string) => void
+  clearFocusDoc: () => void
+
+  // 需求
+  addRequirement: (input: {
+    title: string
+    description: string
+    priority: Priority
+    content?: string
+    productId?: string | null
+  }) => void
+  updateRequirement: (
+    id: string,
+    patch: Partial<Pick<Requirement, 'title' | 'description' | 'content' | 'priority' | 'status'>>,
+  ) => void
+
+  // 任务
+  moveTask: (taskId: string, status: TaskStatus) => void
+  assignTask: (taskId: string, botId: string) => void
+  unassignTask: (taskId: string) => void
+  addTask: (input: {
+    title: string
+    description: string
+    priority: Priority
+    requirementId: string | null
+    kind?: TaskKind
+    productId?: string | null
+    brief?: string
+    targetDocSlug?: string | null
+    dependsOn?: string[]
+  }) => void
+  updateTask: (
+    id: string,
+    patch: Partial<Pick<Task, 'title' | 'description' | 'brief' | 'output' | 'priority' | 'kind' | 'targetDocSlug'>>,
+  ) => void
+  addDependency: (taskId: string, dependsOnId: string) => void
+  removeDependency: (taskId: string, dependsOnId: string) => void
+
+  // 机器人
+  deployBot: (input: { name: string; role: BotRole; model: string; skills: string[] }) => void
+  setBotStatus: (botId: string, status: Bot['status']) => void
+
+  // 产品文档 Wiki
+  addDoc: (input: {
+    slug: string
+    title: string
+    type: DocType
+    productId: string
+    productVersion: string
+    requirementId: string | null
+    ownerBotId: string | null
+    relations?: DocRelation[]
+    content?: string
+  }) => void
+  /** 增删文档间的类型化关系 */
+  addRelation: (slug: string, relation: DocRelation) => void
+  removeRelation: (slug: string, rel: RelType, target: string) => void
+  /** 保存一次修改 = 生成新版本快照（文档版本号 +1） */
+  saveDocVersion: (
+    slug: string,
+    input: { content: string; note: string; authorBotId: string | null; productVersion: string; status: DocStatus },
+  ) => void
+  setDocStatus: (slug: string, status: DocStatus) => void
+  /** 回滚到历史版本：以旧内容生成一个新版本 */
+  rollbackDoc: (slug: string, version: string) => void
+
+  // 模拟
+  toggleSim: (on: boolean) => void
+  tick: () => void
+}
+
+export const useStore = create<State>((set, get) => ({
+  accounts: seedAccounts,
+  currentAccountId: 'acc-root',
+  projects: seedProjects,
+  currentProjectId: seedProjects[0]?.id ?? '',
+  machines: seedMachines,
+  executors: seedExecutors,
+
+  products: seedProducts,
+  requirements: seedRequirements,
+  tasks: seedTasks,
+  bots: seedBots,
+  docs: seedDocs,
+  simRunning: true,
+
+  switchAccount: (currentAccountId) => set({ currentAccountId }),
+  addMemberAccount: ({ name, email, memberRole }) =>
+    set((s) => {
+      const root = s.accounts.find((a) => a.id === s.currentAccountId) ?? s.accounts[0]
+      return {
+        accounts: [
+          ...s.accounts,
+          {
+            id: nextId('acc'),
+            name,
+            email,
+            kind: 'member',
+            orgId: root.orgId,
+            avatarSeed: name.toLowerCase(),
+            memberRole,
+          },
+        ],
+      }
+    }),
+  switchProject: (currentProjectId) => set({ currentProjectId }),
+  addProduct: ({ name, description, currentVersion }) => {
+    const id = nextId('product')
+    set((s) => ({
+      products: [...s.products, { id, projectId: s.currentProjectId, name, description, currentVersion }],
+    }))
+    return id
+  },
+  enrollMachine: ({ name, os }) =>
+    set((s) => {
+      const mid = nextId('m')
+      return {
+        machines: [...s.machines, { id: mid, accountId: s.currentAccountId, name, os, status: 'online' }],
+        executors: [
+          ...s.executors,
+          { id: nextId('e'), machineId: mid, kind: 'claude', label: 'claude · 主号', status: 'idle' },
+          { id: nextId('e'), machineId: mid, kind: 'codex', label: 'codex · 工程', status: 'idle' },
+        ],
+      }
+    }),
+  addProject: ({ name, description }) =>
+    set((s) => {
+      const root = s.accounts.find((a) => a.id === s.currentAccountId) ?? s.accounts[0]
+      const id = nextId('project')
+      return {
+        projects: [...s.projects, { id, orgId: root.orgId, name, description, createdAt: Date.now() }],
+        currentProjectId: id,
+      }
+    }),
+
+  view: 'dashboard',
+  setView: (view) => set({ view }),
+  focusDoc: null,
+  openDoc: (productId, slug) =>
+    set((s) => {
+      const prod = s.products.find((p) => p.id === productId)
+      return {
+        view: 'wiki',
+        focusDoc: { productId, slug },
+        currentProjectId: prod?.projectId ?? s.currentProjectId,
+      }
+    }),
+  clearFocusDoc: () => set({ focusDoc: null }),
+
+  addRequirement: ({ title, description, priority, content, productId }) =>
+    set((s) => ({
+      requirements: [
+        {
+          id: nextId('req'),
+          title,
+          description,
+          content: content ?? `## 目标\n\n> 待补充需求正文，可用 [[slug]] 关联产品文档。`,
+          priority,
+          status: 'planning',
+          createdAt: Date.now(),
+          productId: productId ?? null,
+          taskIds: [],
+        },
+        ...s.requirements,
+      ],
+    })),
+
+  updateRequirement: (id, patch) =>
+    set((s) => ({
+      requirements: s.requirements.map((r) => (r.id === id ? { ...r, ...patch } : r)),
+    })),
+
+  addTask: ({ title, description, priority, requirementId, kind, productId, brief, targetDocSlug, dependsOn }) =>
+    set((s) => {
+      const id = nextId('task')
+      const req = requirementId ? s.requirements.find((r) => r.id === requirementId) : null
+      const task: Task = {
+        id,
+        title,
+        description,
+        kind: kind ?? 'work',
+        status: 'backlog',
+        priority,
+        productId: productId ?? req?.productId ?? null,
+        requirementId,
+        botId: null,
+        brief: brief ?? '',
+        targetDocSlug: targetDocSlug ?? null,
+        output: null,
+        dependsOn: dependsOn ?? [],
+        progress: 0,
+        createdAt: Date.now(),
+        log: [],
+      }
+      return {
+        tasks: [task, ...s.tasks],
+        requirements: requirementId
+          ? s.requirements.map((r) =>
+              r.id === requirementId ? { ...r, taskIds: [...r.taskIds, id] } : r,
+            )
+          : s.requirements,
+      }
+    }),
+
+  updateTask: (id, patch) =>
+    set((s) => ({ tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)) })),
+
+  addDependency: (taskId, dependsOnId) =>
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId && taskId !== dependsOnId && !t.dependsOn.includes(dependsOnId)
+          ? { ...t, dependsOn: [...t.dependsOn, dependsOnId] }
+          : t,
+      ),
+    })),
+
+  removeDependency: (taskId, dependsOnId) =>
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId ? { ...t, dependsOn: t.dependsOn.filter((d) => d !== dependsOnId) } : t,
+      ),
+    })),
+
+  moveTask: (taskId, status) =>
+    set((s) => {
+      const task = s.tasks.find((t) => t.id === taskId)
+      const tasks = s.tasks.map((t) => {
+        if (t.id !== taskId) return t
+        const progress = status === 'done' ? 100 : status === 'backlog' ? 0 : t.progress
+        return { ...t, status, progress }
+      })
+      // 文档任务完成 → 目标文档落地一个新版本（交付物闭环）
+      let docs = s.docs
+      if (status === 'done' && task?.kind === 'doc' && task.targetDocSlug) {
+        docs = s.docs.map((d) => {
+          if (d.slug !== task.targetDocSlug) return d
+          const version = nextVersion(d.versions[0]?.version ?? 'v0')
+          return {
+            ...d,
+            versions: [
+              {
+                version,
+                productVersion: d.versions[0]?.productVersion ?? 'v1.0.0',
+                content: task.output || d.versions[0]?.content || `# ${d.title}`,
+                note: `由任务「${task.title}」交付`,
+                authorBotId: task.botId,
+                status: 'review',
+                createdAt: Date.now(),
+              },
+              ...d.versions,
+            ],
+          }
+        })
+      }
+      return {
+        tasks,
+        docs,
+        // 拖回 backlog 时释放机器人
+        bots:
+          status === 'backlog'
+            ? s.bots.map((b) =>
+                b.currentTaskId === taskId ? { ...b, status: 'idle', currentTaskId: null } : b,
+              )
+            : s.bots,
+      }
+    }),
+
+  assignTask: (taskId, botId) =>
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId
+          ? { ...t, botId, status: t.status === 'backlog' ? 'in_progress' : t.status }
+          : t,
+      ),
+      bots: s.bots.map((b) => {
+        if (b.id === botId) return { ...b, status: 'working', currentTaskId: taskId }
+        // 一个机器人同一时刻只承接一个任务
+        if (b.currentTaskId === taskId) return { ...b, currentTaskId: null, status: 'idle' }
+        return b
+      }),
+    })),
+
+  unassignTask: (taskId) =>
+    set((s) => ({
+      tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, botId: null } : t)),
+      bots: s.bots.map((b) =>
+        b.currentTaskId === taskId ? { ...b, status: 'idle', currentTaskId: null } : b,
+      ),
+    })),
+
+  deployBot: ({ name, role, model, skills }) =>
+    set((s) => ({
+      bots: [
+        ...s.bots,
+        {
+          id: nextId('bot'),
+          name,
+          role,
+          model,
+          status: 'idle',
+          currentTaskId: null,
+          skills,
+          completed: 0,
+          avatarSeed: name.toLowerCase(),
+        },
+      ],
+    })),
+
+  setBotStatus: (botId, status) =>
+    set((s) => ({
+      bots: s.bots.map((b) => (b.id === botId ? { ...b, status } : b)),
+    })),
+
+  addDoc: ({ slug, title, type, productId, productVersion, requirementId, ownerBotId, relations, content }) =>
+    set((s) => {
+      if (s.docs.some((d) => d.slug === slug)) return s
+      const doc: WikiDoc = {
+        slug,
+        title,
+        type,
+        productId,
+        ownerBotId,
+        requirementId,
+        relations: relations ?? [],
+        versions: [
+          {
+            version: 'v1',
+            productVersion,
+            status: 'draft',
+            authorBotId: ownerBotId,
+            note: '初稿',
+            createdAt: Date.now(),
+            content: content ?? `# ${title}\n\n> 由虚拟员工起草中…可在此补充内容，用 [[slug]] 关联其它文档。`,
+          },
+        ],
+      }
+      return { docs: [doc, ...s.docs] }
+    }),
+
+  addRelation: (slug, relation) =>
+    set((s) => ({
+      docs: s.docs.map((d) => {
+        if (d.slug !== slug) return d
+        if (d.relations.some((r) => r.rel === relation.rel && r.target === relation.target)) return d
+        return { ...d, relations: [...d.relations, relation] }
+      }),
+    })),
+
+  removeRelation: (slug, rel, target) =>
+    set((s) => ({
+      docs: s.docs.map((d) =>
+        d.slug === slug
+          ? { ...d, relations: d.relations.filter((r) => !(r.rel === rel && r.target === target)) }
+          : d,
+      ),
+    })),
+
+  saveDocVersion: (slug, { content, note, authorBotId, productVersion, status }) =>
+    set((s) => ({
+      docs: s.docs.map((d) => {
+        if (d.slug !== slug) return d
+        const version = nextVersion(d.versions[0]?.version ?? 'v0')
+        return {
+          ...d,
+          ownerBotId: authorBotId ?? d.ownerBotId,
+          versions: [
+            { version, productVersion, content, note, authorBotId, status, createdAt: Date.now() },
+            ...d.versions,
+          ],
+        }
+      }),
+    })),
+
+  setDocStatus: (slug, status) =>
+    set((s) => ({
+      docs: s.docs.map((d) =>
+        d.slug === slug
+          ? { ...d, versions: d.versions.map((v, i) => (i === 0 ? { ...v, status } : v)) }
+          : d,
+      ),
+    })),
+
+  rollbackDoc: (slug, version) =>
+    set((s) => ({
+      docs: s.docs.map((d) => {
+        if (d.slug !== slug) return d
+        const target = d.versions.find((v) => v.version === version)
+        if (!target) return d
+        const nv = nextVersion(d.versions[0].version)
+        return {
+          ...d,
+          versions: [
+            {
+              version: nv,
+              productVersion: target.productVersion,
+              content: target.content,
+              note: `回滚到 ${version}`,
+              authorBotId: d.ownerBotId,
+              status: 'draft',
+              createdAt: Date.now(),
+            },
+            ...d.versions,
+          ],
+        }
+      }),
+    })),
+
+  toggleSim: (on) => set({ simRunning: on }),
+
+  // 每个 tick 推进所有「工作中」机器人的任务进度，并滚动日志
+  tick: () => {
+    if (!get().simRunning) return
+    set((s) => {
+      const finished: string[] = []
+      const tasks = s.tasks.map((t) => {
+        const bot = s.bots.find((b) => b.id === t.botId && b.status === 'working')
+        if (!bot || t.status !== 'in_progress') return t
+        const inc = 3 + Math.floor(Math.random() * 7)
+        const progress = Math.min(100, t.progress + inc)
+        const log =
+          Math.random() > 0.55
+            ? [...t.log, WORK_LOG_SNIPPETS[Math.floor(Math.random() * WORK_LOG_SNIPPETS.length)]].slice(-8)
+            : t.log
+        if (progress >= 100) {
+          finished.push(t.id)
+          return { ...t, progress: 100, status: 'review' as TaskStatus, log: [...log, '✓ 执行完成，待复核'].slice(-8) }
+        }
+        return { ...t, progress, log }
+      })
+      const bots = s.bots.map((b) =>
+        b.currentTaskId && finished.includes(b.currentTaskId)
+          ? { ...b, status: 'idle' as const, currentTaskId: null, completed: b.completed + 1 }
+          : b,
+      )
+      return { tasks, bots }
+    })
+  },
+}))
