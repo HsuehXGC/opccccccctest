@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { UserPlus, Terminal, FileText, Wrench, Lock, X, GitBranch, Plus, ExternalLink, ClipboardList } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { Avatar, DOC_TYPE, PriorityBadge, TASK_COLUMNS, cx } from '../lib/ui'
@@ -19,8 +19,9 @@ function useBlockers(task: Task) {
 // ── 分配菜单 ─────────────────────────────
 function AssignMenu({ task, onClose }: { task: Task; onClose: () => void }) {
   const bots = useStore((s) => s.bots)
+  const currentOrgId = useStore((s) => s.currentOrgId)
   const assignTask = useStore((s) => s.assignTask)
-  const available = bots.filter((b) => b.status !== 'offline')
+  const available = bots.filter((b) => b.status !== 'offline' && b.orgId === currentOrgId)
   return (
     <div
       className="absolute left-0 top-full z-20 mt-1 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg"
@@ -193,7 +194,9 @@ function TaskDrawer({ taskId, onClose }: { taskId: string; onClose: () => void }
   const task = useStore((s) => s.tasks.find((t) => t.id === taskId))
   const tasks = useStore((s) => s.tasks)
   const docs = useStore((s) => s.docs)
-  const bots = useStore((s) => s.bots)
+  const allBots = useStore((s) => s.bots)
+  const currentOrgId = useStore((s) => s.currentOrgId)
+  const bots = allBots.filter((b) => b.orgId === currentOrgId)
   const requirements = useStore((s) => s.requirements)
   const updateTask = useStore((s) => s.updateTask)
   const moveTask = useStore((s) => s.moveTask)
@@ -421,6 +424,16 @@ export function Kanban() {
   const tasks = useStore((s) => s.tasks)
   const [productFilter, setProductFilter] = useState<string>('all')
   const [openId, setOpenId] = useState<string | null>(null)
+
+  // 命令面板等跨模块跳转：自动打开目标任务抽屉
+  const focusTaskId = useStore((s) => s.focusTaskId)
+  const clearFocusTask = useStore((s) => s.clearFocusTask)
+  useEffect(() => {
+    if (focusTaskId) {
+      setOpenId(focusTaskId)
+      clearFocusTask()
+    }
+  }, [focusTaskId, clearFocusTask])
 
   const products = allProducts.filter((p) => p.projectId === currentProjectId)
   const projectProductIds = useMemo(() => new Set(products.map((p) => p.id)), [products])

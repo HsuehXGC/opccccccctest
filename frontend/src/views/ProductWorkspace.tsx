@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Plus,
   ChevronDown,
@@ -11,12 +11,15 @@ import {
   ListTodo,
   ArrowRight,
   Target,
+  Wrench,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { DOC_TYPE, DOC_TYPE_ORDER, PriorityBadge, cx } from '../lib/ui'
 import { Modal, Field, inputCls } from '../components/Modal'
 import { renderMarkdown } from '../lib/markdown'
-import type { Priority, Requirement, RequirementStatus } from '../types'
+import { planDecomposition } from '../lib/decompose'
+import { toast } from '../lib/toast'
+import type { Priority, Product, Requirement, RequirementStatus, WikiDoc } from '../types'
 
 const REQ_STATUS: Record<RequirementStatus, { label: string; cls: string }> = {
   draft: { label: '草稿', cls: 'bg-slate-100 text-slate-600' },
@@ -153,11 +156,14 @@ function RequirementCard({
   // selector 返回稳定的整表引用，过滤放在渲染体里（避免 Zustand v5 无限重渲染）
   const allTasks = useStore((s) => s.tasks)
   const allDocs = useStore((s) => s.docs)
+  const allProducts = useStore((s) => s.products)
   const tasks = allTasks.filter((t) => t.requirementId === req.id)
   const linkedDocs = allDocs.filter((d) => d.requirementId === req.id)
+  const product = req.productId ? allProducts.find((p) => p.id === req.productId) ?? null : null
   const updateRequirement = useStore((s) => s.updateRequirement)
-  const addTask = useStore((s) => s.addTask)
   const openDoc = useStore((s) => s.openDoc)
+
+  const [decomposing, setDecomposing] = useState(false)
 
   const titleBySlug = useMemo(() => new Map(allDocs.map((d) => [d.slug, d.title])), [allDocs])
   const done = tasks.filter((t) => t.status === 'done').length
@@ -252,17 +258,10 @@ function RequirementCard({
                 <ListTodo size={13} /> 派生任务 · {done}/{tasks.length}
               </span>
               <button
-                onClick={() =>
-                  addTask({
-                    title: `${req.title} · 新子任务`,
-                    description: '待补充执行细节',
-                    priority: req.priority,
-                    requirementId: req.id,
-                  })
-                }
+                onClick={() => setDecomposing(true)}
                 className="flex items-center gap-1 text-xs font-medium text-brand hover:underline"
               >
-                <Sparkles size={13} /> 拆解任务
+                <Sparkles size={13} /> 智能拆解
               </button>
             </div>
             {tasks.length === 0 ? (
@@ -281,7 +280,89 @@ function RequirementCard({
           </div>
         </div>
       )}
+      {decomposing && <DecomposeModal req={req} product={product} docs={allDocs} onClose={() => setDecomposing(false)} />}
     </div>
+  )
+}
+
+// ── 智能拆解预览 ──────────────────────────────────────
+function DecomposeModal({
+  req,
+  product,
+  docs,
+  onClose,
+}: {
+  req: Requirement
+  product: Product | null
+  docs: WikiDoc[]
+  onClose: () => void
+}) {
+  const decomposeRequirement = useStore((s) => s.decomposeRequirement)
+  const plan = useMemo(() => planDecomposition(req, product, docs), [req, product, docs])
+  const docCount = plan.tasks.filter((t) => t.kind === 'doc').length
+  const workCount = plan.tasks.length - docCount
+
+  return (
+    <Modal open onClose={onClose} title={`智能拆解 · ${req.title}`}>
+      <p className="mb-3 text-sm text-slate-500">
+        规划机器人读需求正文与产品文档蓝图，生成下列任务
+        {plan.gapDocs.length > 0 && `，并为 ${plan.gapDocs.length} 个缺口文档补占位草稿`}。
+      </p>
+
+      {plan.gapDocs.length > 0 && (
+        <div className="mb-3">
+          <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">将补齐的蓝图缺口</div>
+          <div className="flex flex-wrap gap-1.5">
+            {plan.gapDocs.map((d) => (
+              <span key={d.slug} className={cx('rounded-md px-2 py-1 text-xs font-medium', DOC_TYPE[d.type].chip)}>
+                {DOC_TYPE[d.type].label}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">
+        将生成 {plan.tasks.length} 个任务 · 文档 {docCount} / 执行 {workCount}
+      </div>
+      <div className="max-h-64 space-y-2 overflow-y-auto">
+        {plan.tasks.map((t, i) => (
+          <div key={i} className="rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
+            <div className="flex items-center gap-2">
+              <span
+                className={cx(
+                  'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium',
+                  t.kind === 'doc' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-600',
+                )}
+              >
+                {t.kind === 'doc' ? <FileText size={11} /> : <Wrench size={11} />}
+                {t.kind === 'doc' ? '文档' : '执行'}
+              </span>
+              <span className="text-sm font-medium">{t.title}</span>
+            </div>
+            <p className="mt-1 line-clamp-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-500">
+              {t.brief}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 flex justify-end gap-2">
+        <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100">
+          取消
+        </button>
+        <button
+          onClick={() => {
+            const n = decomposeRequirement(req.id)
+            toast(`已拆解出 ${n} 个任务${plan.gapDocs.length ? `，补齐 ${plan.gapDocs.length} 个缺口文档` : ''}`)
+            onClose()
+          }}
+          className="flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+        >
+          <Sparkles size={15} /> 生成任务
+        </button>
+      </div>
+    </Modal>
   )
 }
 
@@ -313,6 +394,18 @@ export function ProductWorkspace() {
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState<Requirement | null>(null)
 
+  // 命令面板等跨模块跳转：定位到目标产品并展开其首条需求
+  const focusProductId = useStore((s) => s.focusProductId)
+  const clearFocusProduct = useStore((s) => s.clearFocusProduct)
+  useEffect(() => {
+    if (focusProductId && products.some((p) => p.id === focusProductId)) {
+      setProductId(focusProductId)
+      const first = requirements.find((r) => r.productId === focusProductId)
+      setExpanded(new Set(first ? [first.id] : []))
+      clearFocusProduct()
+    }
+  }, [focusProductId, products, requirements, clearFocusProduct])
+
   const presentTypes = new Set(productDocs.map((d) => d.type))
   const coreCovered = CORE_TYPES.filter((t) => presentTypes.has(t)).length
   const tasksDone = productTasks.filter((t) => t.status === 'done').length
@@ -332,6 +425,7 @@ export function ProductWorkspace() {
     setNpName('')
     setNpVersion('v1.0.0')
     setAddingProduct(false)
+    toast(`已创建产品「${npName.trim()}」`)
   }
 
   const productModalEl = addingProduct && (
@@ -500,14 +594,20 @@ export function ProductWorkspace() {
       {creating && (
         <ReqModal
           onClose={() => setCreating(false)}
-          onSubmit={(v) => addRequirement({ ...v, productId: product.id })}
+          onSubmit={(v) => {
+            addRequirement({ ...v, productId: product.id })
+            toast(`已创建需求「${v.title}」`)
+          }}
         />
       )}
       {editing && (
         <ReqModal
           edit={editing}
           onClose={() => setEditing(null)}
-          onSubmit={(v) => updateRequirement(editing.id, v)}
+          onSubmit={(v) => {
+            updateRequirement(editing.id, v)
+            toast('需求已保存')
+          }}
         />
       )}
       {productModalEl}

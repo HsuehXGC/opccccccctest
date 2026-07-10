@@ -53,6 +53,21 @@ body {
   animation: pulse-dot 1.4s ease-in-out infinite;
 }
 
+/* toast 进场 */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.toast-in {
+  animation: toast-in 0.18s ease-out;
+}
+
 /* Wiki 互链 */
 .wikilink {
   color: var(--color-brand);

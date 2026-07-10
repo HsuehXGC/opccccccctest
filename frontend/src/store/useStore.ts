@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type {
   Account,
   Bot,
@@ -22,6 +23,8 @@ import { seedBots, seedRequirements, seedTasks } from '../mock/data'
 import { seedDocs } from '../mock/docs'
 import { seedProducts } from '../mock/products'
 import { seedAccounts, seedExecutors, seedMachines, seedProjects } from '../mock/accounts'
+import { toast } from '../lib/toast'
+import { planDecomposition } from '../lib/decompose'
 
 /** 顶层导航视图 */
 export type View = 'dashboard' | 'requirements' | 'wiki' | 'kanban' | 'workforce' | 'account'
@@ -46,6 +49,8 @@ interface State {
   // 账户与项目
   accounts: Account[]
   currentAccountId: string
+  /** 当前登录用户的账户组（由鉴权驱动）；全站按它隔离项目/机器人/机器 */
+  currentOrgId: string | null
   projects: Project[]
   currentProjectId: string
   machines: Machine[]
@@ -61,6 +66,8 @@ interface State {
   // 账户与项目
   switchAccount: (accountId: string) => void
   addMemberAccount: (input: { name: string; email: string; memberRole: string }) => void
+  /** 登录/切换账户组：设定当前 org 并把 currentProjectId 落到该 org 的首个项目 */
+  enterOrg: (orgId: string | null) => void
   switchProject: (projectId: string) => void
   addProject: (input: { name: string; description: string }) => void
   addProduct: (input: { name: string; description: string; currentVersion: string }) => string
@@ -74,6 +81,14 @@ interface State {
   focusDoc: { productId: string; slug: string } | null
   openDoc: (productId: string, slug: string) => void
   clearFocusDoc: () => void
+  /** 请求看板打开某任务抽屉（命令面板等跨模块跳转用） */
+  focusTaskId: string | null
+  openTask: (taskId: string) => void
+  clearFocusTask: () => void
+  /** 请求需求工作台定位到某产品 */
+  focusProductId: string | null
+  openProduct: (productId: string) => void
+  clearFocusProduct: () => void
 
   // 需求
   addRequirement: (input: {
@@ -109,6 +124,8 @@ interface State {
   ) => void
   addDependency: (taskId: string, dependsOnId: string) => void
   removeDependency: (taskId: string, dependsOnId: string) => void
+  /** 智能拆解：按需求正文 + 蓝图缺口，一键生成一组带 brief 的文档/执行任务（含缺口文档草稿）。返回生成的任务数 */
+  decomposeRequirement: (requirementId: string) => number
 
   // 机器人
   deployBot: (input: { name: string; role: BotRole; model: string; skills: string[] }) => void
@@ -143,9 +160,12 @@ interface State {
   tick: () => void
 }
 
-export const useStore = create<State>((set, get) => ({
+export const useStore = create<State>()(
+  persist(
+    (set, get) => ({
   accounts: seedAccounts,
   currentAccountId: 'acc-root',
+  currentOrgId: null,
   projects: seedProjects,
   currentProjectId: seedProjects[0]?.id ?? '',
   machines: seedMachines,
@@ -177,6 +197,12 @@ export const useStore = create<State>((set, get) => ({
         ],
       }
     }),
+  enterOrg: (orgId) =>
+    set((s) => {
+      // 落到该账户组的首个项目（新 org 无项目则置空）
+      const first = orgId ? s.projects.find((p) => p.orgId === orgId) : undefined
+      return { currentOrgId: orgId, currentProjectId: first?.id ?? '' }
+    }),
   switchProject: (currentProjectId) => set({ currentProjectId }),
   addProduct: ({ name, description, currentVersion }) => {
     const id = nextId('product')
@@ -189,7 +215,7 @@ export const useStore = create<State>((set, get) => ({
     set((s) => {
       const mid = nextId('m')
       return {
-        machines: [...s.machines, { id: mid, accountId: s.currentAccountId, name, os, status: 'online' }],
+        machines: [...s.machines, { id: mid, accountId: s.currentAccountId, orgId: s.currentOrgId ?? 'org-1', name, os, status: 'online' }],
         executors: [
           ...s.executors,
           { id: nextId('e'), machineId: mid, kind: 'claude', label: 'claude · 主号', status: 'idle' },
@@ -200,9 +226,10 @@ export const useStore = create<State>((set, get) => ({
   addProject: ({ name, description }) =>
     set((s) => {
       const root = s.accounts.find((a) => a.id === s.currentAccountId) ?? s.accounts[0]
+      const orgId = s.currentOrgId ?? root?.orgId ?? 'org-1'
       const id = nextId('project')
       return {
-        projects: [...s.projects, { id, orgId: root.orgId, name, description, createdAt: Date.now() }],
+        projects: [...s.projects, { id, orgId, name, description, createdAt: Date.now() }],
         currentProjectId: id,
       }
     }),
@@ -220,6 +247,25 @@ export const useStore = create<State>((set, get) => ({
       }
     }),
   clearFocusDoc: () => set({ focusDoc: null }),
+  focusTaskId: null,
+  openTask: (taskId) =>
+    set((s) => {
+      const task = s.tasks.find((t) => t.id === taskId)
+      const prod = task?.productId ? s.products.find((p) => p.id === task.productId) : null
+      return { view: 'kanban', focusTaskId: taskId, currentProjectId: prod?.projectId ?? s.currentProjectId }
+    }),
+  clearFocusTask: () => set({ focusTaskId: null }),
+  focusProductId: null,
+  openProduct: (productId) =>
+    set((s) => {
+      const prod = s.products.find((p) => p.id === productId)
+      return {
+        view: 'requirements',
+        focusProductId: productId,
+        currentProjectId: prod?.projectId ?? s.currentProjectId,
+      }
+    }),
+  clearFocusProduct: () => set({ focusProductId: null }),
 
   addRequirement: ({ title, description, priority, content, productId }) =>
     set((s) => ({
@@ -295,6 +341,41 @@ export const useStore = create<State>((set, get) => ({
       ),
     })),
 
+  decomposeRequirement: (requirementId) => {
+    const s = get()
+    const req = s.requirements.find((r) => r.id === requirementId)
+    if (!req) return 0
+    const product = req.productId ? s.products.find((p) => p.id === req.productId) ?? null : null
+    const plan = planDecomposition(req, product, s.docs)
+    // 先补齐蓝图缺口文档草稿（作为文档任务的交付目标，完成后闭环生成新版本）
+    for (const d of plan.gapDocs) {
+      get().addDoc({
+        slug: d.slug,
+        title: d.title,
+        type: d.type,
+        productId: product?.id ?? '',
+        productVersion: product?.currentVersion ?? 'v1.0.0',
+        requirementId: req.id,
+        ownerBotId: null,
+        content: `# ${d.title}\n\n> 由需求「${req.title}」智能拆解生成的占位草稿，待虚拟员工按简报补全。`,
+      })
+    }
+    // 再生成带 brief 的文档/执行任务
+    for (const t of plan.tasks) {
+      get().addTask({
+        title: t.title,
+        description: t.description,
+        priority: req.priority,
+        requirementId: req.id,
+        kind: t.kind,
+        productId: product?.id ?? null,
+        brief: t.brief,
+        targetDocSlug: t.targetDocSlug,
+      })
+    }
+    return plan.tasks.length
+  },
+
   moveTask: (taskId, status) =>
     set((s) => {
       const task = s.tasks.find((t) => t.id === taskId)
@@ -368,6 +449,7 @@ export const useStore = create<State>((set, get) => ({
         ...s.bots,
         {
           id: nextId('bot'),
+          orgId: s.currentOrgId ?? 'org-1',
           name,
           role,
           model,
@@ -484,6 +566,7 @@ export const useStore = create<State>((set, get) => ({
   // 每个 tick 推进所有「工作中」机器人的任务进度，并滚动日志
   tick: () => {
     if (!get().simRunning) return
+    const finishedTitles: string[] = []
     set((s) => {
       const finished: string[] = []
       const tasks = s.tasks.map((t) => {
@@ -497,6 +580,7 @@ export const useStore = create<State>((set, get) => ({
             : t.log
         if (progress >= 100) {
           finished.push(t.id)
+          finishedTitles.push(t.title)
           return { ...t, progress: 100, status: 'review' as TaskStatus, log: [...log, '✓ 执行完成，待复核'].slice(-8) }
         }
         return { ...t, progress, log }
@@ -508,5 +592,56 @@ export const useStore = create<State>((set, get) => ({
       )
       return { tasks, bots }
     })
+    // set 之后再弹反馈，避免在更新期触发跨 store 副作用
+    finishedTitles.forEach((title) => toast(`「${title}」执行完成，待复核`, 'info'))
   },
-}))
+    }),
+    {
+      name: 'opc-store',
+      version: 1,
+      // 只持久化数据与当前作用域；瞬态跳转焦点（focusDoc/focusTaskId/focusProductId）不持久化
+      partialize: (s) => ({
+        accounts: s.accounts,
+        currentAccountId: s.currentAccountId,
+        currentOrgId: s.currentOrgId,
+        projects: s.projects,
+        currentProjectId: s.currentProjectId,
+        machines: s.machines,
+        executors: s.executors,
+        products: s.products,
+        requirements: s.requirements,
+        tasks: s.tasks,
+        bots: s.bots,
+        docs: s.docs,
+        simRunning: s.simRunning,
+        view: s.view,
+      }),
+      // 刷新后修复自增 id 计数器：扫描既有 id 的数字后缀，避免新建项与旧 id 冲突
+      onRehydrateStorage: () => (state) => {
+        if (!state) return
+        let max = uid
+        const scan = (arr: { id: string }[] | undefined) =>
+          arr?.forEach((x) => {
+            const n = parseInt(x.id.slice(x.id.lastIndexOf('-') + 1), 10)
+            if (Number.isFinite(n)) max = Math.max(max, n + 1)
+          })
+        scan(state.tasks)
+        scan(state.requirements)
+        scan(state.products)
+        scan(state.projects)
+        scan(state.accounts)
+        scan(state.bots)
+        scan(state.machines)
+        scan(state.executors)
+        uid = max
+        // 迁移：老数据的 bots/machines 无 orgId，回填为 org-1（种子账户组）
+        state.bots?.forEach((b) => {
+          if (!b.orgId) b.orgId = 'org-1'
+        })
+        state.machines?.forEach((m) => {
+          if (!m.orgId) m.orgId = 'org-1'
+        })
+      },
+    },
+  ),
+)
