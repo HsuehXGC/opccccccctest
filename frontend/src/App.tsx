@@ -1,13 +1,18 @@
-import { useEffect } from 'react'
-import { ChevronDown, FileText, KanbanSquare, LayoutDashboard, Pause, Play, Target, Users } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ChevronDown, Command, FileText, KanbanSquare, LayoutDashboard, Loader2, LogOut, Pause, Play, Search, Target, Users } from 'lucide-react'
 import { useStore, type View } from './store/useStore'
+import { useAuth } from './store/useAuth'
 import { Avatar, cx } from './lib/ui'
+import { Toaster } from './lib/toast'
+import { CommandPalette } from './components/CommandPalette'
+import { bootstrapImport } from './lib/bootstrapImport'
 import { Dashboard } from './views/Dashboard'
 import { ProductWorkspace } from './views/ProductWorkspace'
 import { Wiki } from './views/Wiki'
 import { Kanban } from './views/Kanban'
 import { Workforce } from './views/Workforce'
 import { AccountView } from './views/Account'
+import { Login } from './views/Login'
 
 const NAV: { key: View; label: string; icon: typeof Target }[] = [
   { key: 'dashboard', label: '概览', icon: LayoutDashboard },
@@ -23,14 +28,31 @@ export function App() {
   const tick = useStore((s) => s.tick)
   const simRunning = useStore((s) => s.simRunning)
   const toggleSim = useStore((s) => s.toggleSim)
-  const workingCount = useStore((s) => s.bots.filter((b) => b.status === 'working').length)
+  const currentOrgId = useStore((s) => s.currentOrgId)
+  const workingCount = useStore((s) => s.bots.filter((b) => b.status === 'working' && b.orgId === s.currentOrgId).length)
 
-  const projects = useStore((s) => s.projects)
+  const allProjects = useStore((s) => s.projects)
   const currentProjectId = useStore((s) => s.currentProjectId)
   const switchProject = useStore((s) => s.switchProject)
-  const accounts = useStore((s) => s.accounts)
-  const currentAccountId = useStore((s) => s.currentAccountId)
-  const account = accounts.find((a) => a.id === currentAccountId) ?? accounts[0]
+  const projects = allProjects.filter((p) => p.orgId === currentOrgId)
+
+  // 鉴权
+  const authStatus = useAuth((s) => s.status)
+  const authUser = useAuth((s) => s.user)
+  const loadMe = useAuth((s) => s.loadMe)
+  const logout = useAuth((s) => s.logout)
+
+  const [paletteOpen, setPaletteOpen] = useState(false)
+
+  // 启动时用已存 token 校验身份
+  useEffect(() => {
+    void loadMe()
+  }, [loadMe])
+
+  // 首次启动自动导入 PlotMax 2.0 演示数据（幂等，归属 org-1）
+  useEffect(() => {
+    void bootstrapImport()
+  }, [])
 
   // 模拟机器人执行的心跳
   useEffect(() => {
@@ -38,7 +60,37 @@ export function App() {
     return () => clearInterval(id)
   }, [tick])
 
+  // ⌘K / Ctrl+K 打开全局命令面板
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // 鉴权门禁：未登录展示登录页
+  if (authStatus === 'loading') {
+    return (
+      <div className="flex h-full items-center justify-center text-slate-300">
+        <Loader2 size={28} className="animate-spin" />
+      </div>
+    )
+  }
+  if (authStatus === 'anon' || !authUser) {
+    return (
+      <>
+        <Login />
+        <Toaster />
+      </>
+    )
+  }
+
   return (
+    <>
     <div className="flex h-full">
       {/* 侧边栏 */}
       <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white">
@@ -67,6 +119,20 @@ export function App() {
             </select>
             <ChevronDown size={15} className="pointer-events-none absolute right-2.5 top-2.5 text-slate-400" />
           </div>
+        </div>
+
+        {/* 全局搜索入口 */}
+        <div className="px-3 pb-2">
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-400 transition hover:border-brand/40 hover:text-slate-600"
+          >
+            <Search size={15} />
+            <span>搜索…</span>
+            <kbd className="ml-auto flex items-center gap-0.5 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium">
+              <Command size={10} /> K
+            </kbd>
+          </button>
         </div>
 
         <nav className="flex-1 space-y-1 px-3">
@@ -105,21 +171,30 @@ export function App() {
         </div>
 
         {/* 账户 */}
-        <button
-          onClick={() => setView('account')}
-          className={cx(
-            'm-3 mt-0 flex items-center gap-2.5 rounded-xl border p-2.5 text-left transition',
-            view === 'account' ? 'border-brand/30 bg-brand-soft' : 'border-slate-200 hover:bg-slate-50',
-          )}
-        >
-          <Avatar seed={account.avatarSeed} name={account.name} size={34} />
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold">{account.name}</div>
-            <div className="truncate text-[11px] text-slate-400">
-              {account.kind === 'root' ? 'Root 账户' : account.memberRole ?? '成员'}
+        <div className="m-3 mt-0 flex items-center gap-1">
+          <button
+            onClick={() => setView('account')}
+            className={cx(
+              'flex min-w-0 flex-1 items-center gap-2.5 rounded-xl border p-2.5 text-left transition',
+              view === 'account' ? 'border-brand/30 bg-brand-soft' : 'border-slate-200 hover:bg-slate-50',
+            )}
+          >
+            <Avatar seed={authUser.avatarSeed} name={authUser.name} size={34} />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold">{authUser.name}</div>
+              <div className="truncate text-[11px] text-slate-400">
+                {authUser.role === 'root' ? 'Root 账户' : authUser.memberRole ?? '成员'}
+              </div>
             </div>
-          </div>
-        </button>
+          </button>
+          <button
+            onClick={logout}
+            title="登出"
+            className="shrink-0 self-stretch rounded-xl border border-slate-200 px-2 text-slate-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500"
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
       </aside>
 
       {/* 主区域 */}
@@ -132,5 +207,8 @@ export function App() {
         {view === 'account' && <AccountView />}
       </main>
     </div>
+      {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
+      <Toaster />
+    </>
   )
 }

@@ -52,9 +52,9 @@ export const seedProjects: Project[] = [
 
 // 本地算力（后期预览）：账户绑定的电脑 + 上面跑的 claude/codex 执行器
 export const seedMachines: Machine[] = [
-  { id: 'm-1', accountId: 'acc-root', name: '陈学官 · MacBook Pro', os: 'macOS 15', status: 'online' },
-  { id: 'm-2', accountId: 'acc-m1', name: '林工 · 工作站', os: 'Ubuntu 24.04', status: 'online' },
-  { id: 'm-3', accountId: 'acc-m2', name: '周运营 · 笔记本', os: 'Windows 11', status: 'offline' },
+  { id: 'm-1', accountId: 'acc-root', orgId: 'org-1', name: '陈学官 · MacBook Pro', os: 'macOS 15', status: 'online' },
+  { id: 'm-2', accountId: 'acc-m1', orgId: 'org-1', name: '林工 · 工作站', os: 'Ubuntu 24.04', status: 'online' },
+  { id: 'm-3', accountId: 'acc-m2', orgId: 'org-1', name: '周运营 · 笔记本', os: 'Windows 11', status: 'offline' },
 ]
 
 export const seedExecutors: Executor[] = [

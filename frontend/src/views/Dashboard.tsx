@@ -33,7 +33,9 @@ function Stat({
 export function Dashboard({ onNavigate }: { onNavigate: (v: View) => void }) {
   const allReqs = useStore((s) => s.requirements)
   const allTasks = useStore((s) => s.tasks)
-  const bots = useStore((s) => s.bots)
+  const allBots = useStore((s) => s.bots)
+  const currentOrgId = useStore((s) => s.currentOrgId)
+  const bots = allBots.filter((b) => b.orgId === currentOrgId)
   const allProducts = useStore((s) => s.products)
   const currentProjectId = useStore((s) => s.currentProjectId)
 

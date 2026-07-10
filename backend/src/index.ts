@@ -1,5 +1,20 @@
+import 'dotenv/config'
 import express from 'express'
+import cors from 'cors'
 import { gateway } from './agentGateway.ts'
+import { initStore } from './authStore.ts'
+import {
+  changePassword,
+  createMember,
+  login,
+  openRoot,
+  orgUsers,
+  registerRoot,
+  requireAuth,
+  requireRoot,
+  setMemberDisabled,
+  type AuthedRequest,
+} from './auth.ts'
 
 // ── OPC 后端骨架 ──────────────────────────────────────────────
 // 架构：内网机器上的常驻 agent 出站建 WSS 长连接 → AgentGateway 管理连接、
@@ -9,11 +24,88 @@ import { gateway } from './agentGateway.ts'
 // 里程碑 2：接入真实 agent —— 在 /agent 挂 WebSocket 服务器，把每条连接包成
 //           AgentConnection 交给 gateway；派单走 gateway.dispatch()。
 
+initStore()
+
 const app = express()
+app.use(cors())
 app.use(express.json())
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'opc-backend', agents: gateway.listMachines().length })
+})
+
+// ── 鉴权 ──────────────────────────────────────────────────
+// 账户组（org）= Root + 成员；每个 org 是隔离工作区。bcrypt 存密码，JWT 无状态会话。
+
+// 注册（= 开一个新的 Root 账号 + 独立账户组）
+app.post('/api/auth/register', (req, res) => {
+  try {
+    res.json(registerRoot(req.body ?? {}))
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message })
+  }
+})
+
+// 登录
+app.post('/api/auth/login', (req, res) => {
+  try {
+    res.json(login(req.body ?? {}))
+  } catch (err) {
+    res.status(401).json({ error: (err as Error).message })
+  }
+})
+
+// 当前用户（校验 token）
+app.get('/api/auth/me', requireAuth, (req: AuthedRequest, res) => {
+  res.json({ user: req.auth!.user })
+})
+
+// 修改自己的密码
+app.post('/api/auth/password', requireAuth, (req: AuthedRequest, res) => {
+  try {
+    changePassword(req.auth!.user.id, req.body?.currentPassword, req.body?.newPassword)
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message })
+  }
+})
+
+// 登出（无状态 JWT，客户端丢弃 token 即可；此处仅回执）
+app.post('/api/auth/logout', (_req, res) => {
+  res.json({ ok: true })
+})
+
+// 本账户组成员列表
+app.get('/api/org/users', requireAuth, (req: AuthedRequest, res) => {
+  res.json({ users: orgUsers(req.auth!.user.orgId) })
+})
+
+// root 在本账户组内新增成员
+app.post('/api/org/members', requireAuth, requireRoot, (req: AuthedRequest, res) => {
+  try {
+    res.json({ user: createMember(req.auth!.user.orgId, req.body ?? {}) })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message })
+  }
+})
+
+// root 停用/启用本账户组内成员
+app.post('/api/org/members/:id/disabled', requireAuth, requireRoot, (req: AuthedRequest, res) => {
+  try {
+    const disabled = req.body?.disabled !== false
+    res.json({ user: setMemberDisabled(req.auth!.user.id, req.auth!.user.orgId, String(req.params.id), disabled) })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message })
+  }
+})
+
+// 「给用户开 Root 账号」：创建一个独立账户组及其 Root 用户
+app.post('/api/admin/roots', requireAuth, requireRoot, (req: AuthedRequest, res) => {
+  try {
+    res.json({ user: openRoot(req.body ?? {}) })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message })
+  }
 })
 
 // 「绑定电脑」：为当前账户签发一次性 enroll token（放进安装命令）

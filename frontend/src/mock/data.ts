@@ -6,6 +6,7 @@ const T0 = 1_752_000_000_000
 export const seedBots: Bot[] = [
   {
     id: 'bot-atlas',
+    orgId: 'org-1',
     name: 'Atlas',
     role: '全栈工程',
     model: 'claude-opus-4-8',
@@ -17,6 +18,7 @@ export const seedBots: Bot[] = [
   },
   {
     id: 'bot-nova',
+    orgId: 'org-1',
     name: 'Nova',
     role: '前端',
     model: 'claude-sonnet-4-6',
@@ -28,6 +30,7 @@ export const seedBots: Bot[] = [
   },
   {
     id: 'bot-orion',
+    orgId: 'org-1',
     name: 'Orion',
     role: '后端',
     model: 'claude-sonnet-4-6',
@@ -39,6 +42,7 @@ export const seedBots: Bot[] = [
   },
   {
     id: 'bot-lyra',
+    orgId: 'org-1',
     name: 'Lyra',
     role: '数据分析',
     model: 'claude-opus-4-8',
@@ -50,6 +54,7 @@ export const seedBots: Bot[] = [
   },
   {
     id: 'bot-vega',
+    orgId: 'org-1',
     name: 'Vega',
     role: '文案运营',
     model: 'claude-haiku-4-5',
@@ -61,6 +66,7 @@ export const seedBots: Bot[] = [
   },
   {
     id: 'bot-rigel',
+    orgId: 'org-1',
     name: 'Rigel',
     role: '测试',
     model: 'claude-haiku-4-5',

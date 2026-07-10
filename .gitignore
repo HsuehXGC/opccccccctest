@@ -7,3 +7,6 @@ dist
 
 # build info
 *.tsbuildinfo
+
+# 后端本地用户库
+backend/.data

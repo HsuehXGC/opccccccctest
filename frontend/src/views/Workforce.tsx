@@ -101,7 +101,10 @@ function BotCard({ bot }: { bot: Bot }) {
 }
 
 export function Workforce() {
-  const { bots, deployBot } = useStore()
+  const allBots = useStore((s) => s.bots)
+  const currentOrgId = useStore((s) => s.currentOrgId)
+  const deployBot = useStore((s) => s.deployBot)
+  const bots = allBots.filter((b) => b.orgId === currentOrgId)
   const [open, setOpen] = useState(false)
 
   const [name, setName] = useState('')
