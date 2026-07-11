@@ -31,7 +31,8 @@ export type AgentToCloud =
 export type CloudToAgent =
   | { t: 'enrolled'; machineId: string; agentToken: string }
   // 在指定执行器上跑一段任务简报（= claude -p / codex 的输入），流式回传
-  | { t: 'job:dispatch'; jobId: string; executorId: string; kind: 'claude' | 'codex'; prompt: string; cwd?: string }
+  // mode='plan' 时以 CLI plan 模式运行（只规划、不改动，用于会议讨论）
+  | { t: 'job:dispatch'; jobId: string; executorId: string; kind: 'claude' | 'codex'; prompt: string; cwd?: string; mode?: 'plan' }
   | { t: 'job:cancel'; jobId: string }
   | { t: 'ping' }
 

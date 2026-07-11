@@ -151,7 +151,7 @@ app.post('/api/agent/run', requireAuth, async (req: AuthedRequest, res) => {
 
 /** 流式派单：派单后把执行器回传的会话内容(chunk/done/error)以 SSE 实时推给前端 */
 app.post('/api/agent/run-stream', requireAuth, (req: AuthedRequest, res) => {
-  const { executorId, prompt, cwd } = req.body ?? {}
+  const { executorId, prompt, cwd, planMode } = req.body ?? {}
   if (!executorId || !prompt) return res.status(400).json({ error: 'executorId 和 prompt 必填' })
   const orgId = req.auth!.user.orgId
   const owner = gateway.listMachines().find((m) => m.accountId === orgId && m.executors.some((e) => e.id === executorId))
@@ -166,10 +166,24 @@ app.post('/api/agent/run-stream', requireAuth, (req: AuthedRequest, res) => {
   const write = (obj: unknown) => res.write(`data: ${JSON.stringify(obj)}\n\n`)
 
   let jobId = ''
+  let chunks = 0
+  let idle: NodeJS.Timeout
+  const IDLE_MS = 180_000 // 180s 无任何回传即判定卡住
+  const armIdle = () => {
+    clearTimeout(idle)
+    idle = setTimeout(() => {
+      console.log(`⏱ run-stream ${jobId}: 180s 无响应，中断（收到 ${chunks} chunks）`)
+      write({ t: 'error', error: '执行器 180 秒无响应（claude 可能卡在权限/信任提示，或未产出）。已中断。' })
+      finish()
+    }, IDLE_MS)
+  }
   const onJob = (e: { type: string; jobId: string; text?: string; result?: string; error?: string }) => {
     if (e.jobId !== jobId) return
-    if (e.type === 'chunk') write({ t: 'chunk', text: e.text })
-    else if (e.type === 'done') {
+    armIdle()
+    if (e.type === 'chunk') {
+      chunks++
+      write({ t: 'chunk', text: e.text })
+    } else if (e.type === 'done') {
       write({ t: 'done', result: e.result })
       finish()
     } else if (e.type === 'error') {
@@ -178,17 +192,25 @@ app.post('/api/agent/run-stream', requireAuth, (req: AuthedRequest, res) => {
     }
   }
   const finish = () => {
+    clearTimeout(idle)
     gateway.off('job', onJob)
-    res.end()
+    if (!res.writableEnded) res.end()
   }
+  // 先注册监听，再派单——否则执行器回传很快时事件会在注册前就 emit 掉（监听数=0）
+  gateway.on('job', onJob)
   try {
-    jobId = gateway.dispatch(executorId, prompt, cwd).jobId
+    jobId = gateway.dispatch(executorId, prompt, cwd, planMode ? 'plan' : undefined).jobId
   } catch (err) {
+    gateway.off('job', onJob)
     write({ t: 'error', error: (err as Error).message })
     return res.end()
   }
-  gateway.on('job', onJob)
-  req.on('close', () => gateway.off('job', onJob))
+  armIdle()
+  // 用 res 的 close（客户端断开）清理，避免 req.close 过早触发移除监听
+  res.on('close', () => {
+    clearTimeout(idle)
+    gateway.off('job', onJob)
+  })
 })
 
 const PORT = Number(process.env.PORT) || 8787

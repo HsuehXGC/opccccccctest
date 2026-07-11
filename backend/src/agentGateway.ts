@@ -107,12 +107,12 @@ export class AgentGateway extends EventEmitter {
    * 把任务简报下发到承载指定执行器的机器 agent。
    * dispatch 是「派机器人执行任务」的落点：task.brief → 某执行器上的 claude -p。
    */
-  dispatch(executorId: string, prompt: string, cwd?: string): { jobId: string; machineId: string } {
+  dispatch(executorId: string, prompt: string, cwd?: string, mode?: 'plan'): { jobId: string; machineId: string } {
     const hit = this.findExecutor(executorId)
     if (!hit) throw new Error(`执行器 ${executorId} 不在线`)
     const { agent, executor } = hit
     const jobId = genId('job')
-    agent.conn.send({ t: 'job:dispatch', jobId, executorId, kind: executor.kind, prompt, cwd })
+    agent.conn.send({ t: 'job:dispatch', jobId, executorId, kind: executor.kind, prompt, cwd, mode })
     return { jobId, machineId: agent.conn.machineId }
   }
 

@@ -162,16 +162,18 @@ function renderClaudeEvent(ev) {
 }
 
 // ── 执行一段派单 = 在对应 CLI 上跑 prompt，流式回传 ──────────
-function runJob({ jobId, kind, prompt, cwd }) {
+function runJob({ jobId, kind, prompt, cwd, mode }) {
   const execId = `${machineId}-${kind}`
   busy.add(execId)
   const bin = binOf[kind] || findBin(kind) || kind
   const isClaude = kind !== 'codex'
-  // claude 用 stream-json + 部分消息，拿到逐 token 会话内容
+  // claude 用 stream-json + 部分消息拿逐 token 会话内容；
+  // --dangerously-skip-permissions 绕过 headless 下的首次信任/权限提示（否则无人应答会挂起）。
+  // 注：--permission-mode plan 在 headless 无人审批会挂起，故不使用；「只讨论不执行」由提示词约束。
   const args = isClaude
-    ? ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--include-partial-messages']
+    ? ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--dangerously-skip-permissions']
     : ['exec', prompt]
-  console.log(`▶ job ${jobId}: ${bin} ${isClaude ? '-p (stream-json)' : 'exec'} "${String(prompt).slice(0, 50)}…"`)
+  console.log(`▶ job ${jobId}: ${bin} ${isClaude ? `-p${mode === 'plan' ? ' (plan意图)' : ''}` : 'exec'} "${String(prompt).slice(0, 50)}…"`)
 
   let child
   try {
@@ -187,6 +189,7 @@ function runJob({ jobId, kind, prompt, cwd }) {
   let result = '' // 最终结果（stream-json 的 result 事件；否则累积文本）
   let streamed = '' // 已流式发出的可读文本
   let buf = ''
+  let stdoutBytes = 0
 
   function pushChunk(text) {
     if (!text) return
@@ -195,6 +198,7 @@ function runJob({ jobId, kind, prompt, cwd }) {
   }
 
   child.stdout.on('data', (d) => {
+    stdoutBytes += d.length
     buf += d.toString()
     if (!isClaude) {
       pushChunk(buf)
@@ -232,9 +236,10 @@ function runJob({ jobId, kind, prompt, cwd }) {
   child.on('close', (code) => {
     busy.delete(execId)
     running.delete(jobId)
-    console.log(`■ job ${jobId} 结束 exit=${code}`)
+    console.log(`■ job ${jobId} 结束 exit=${code} · stdout ${stdoutBytes} 字节 · streamed ${streamed.length} · result ${result.length}`)
     const final = (result || streamed).trim()
-    if (code === 0) send({ t: 'job:done', jobId, exitCode: 0, result: final })
+    if (code === 0 && final) send({ t: 'job:done', jobId, exitCode: 0, result: final })
+    else if (code === 0) send({ t: 'job:error', jobId, error: `claude 退出正常但无可解析输出（stdout ${stdoutBytes} 字节）` })
     else send({ t: 'job:error', jobId, error: final || `退出码 ${code}` })
   })
 }

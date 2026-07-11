@@ -50,6 +50,7 @@ function TaskDispatch({ task }: { task: Task }) {
     try {
       await runExecutorStream(token, { executorId: effectiveExec, prompt: fullPrompt }, (e) => {
         if (e.t === 'chunk') {
+          if (e.text.startsWith('[agent]')) return
           acc += e.text
           setOutput(acc)
         } else if (e.t === 'done') {

@@ -59,7 +59,7 @@ type StreamEvent = { t: 'chunk'; text: string } | { t: 'done'; result: string } 
 /** 流式派单：读 SSE 响应体，逐块回调（会话内容实时显示用） */
 export async function runExecutorStream(
   token: string,
-  body: { executorId: string; prompt: string },
+  body: { executorId: string; prompt: string; planMode?: boolean },
   onEvent: (e: StreamEvent) => void,
 ): Promise<void> {
   const res = await fetch(`${BASE}/agent/run-stream`, {
