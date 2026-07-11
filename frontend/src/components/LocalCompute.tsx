@@ -13,7 +13,7 @@ const EXEC_LABEL: Record<string, string> = { idle: '空闲', busy: '忙碌', off
 function bindCommand(token: string) {
   const origin = window.location.origin
   const wss = `${origin.replace(/^http/, 'ws')}/agent`
-  return `curl -fsSL ${origin}/opc-agent.mjs -o /tmp/opc-agent.mjs && \\\n  OPC_TOKEN=${token} OPC_URL=${wss} node /tmp/opc-agent.mjs`
+  return `cd ~ && curl -fsSL ${origin}/opc-agent.mjs -o opc-agent.mjs && \\\n  OPC_TOKEN=${token} OPC_URL=${wss} node opc-agent.mjs`
 }
 
 export function LocalCompute() {
@@ -227,13 +227,13 @@ export function LocalCompute() {
 
           {enrolling || !enrollTok ? (
             <div className="flex items-center justify-center gap-2 rounded-lg bg-slate-50 py-8 text-sm text-slate-400">
-              <Loader2 size={15} className="animate-spin" /> 生成一次性 token…
+              <Loader2 size={15} className="animate-spin" /> 生成绑定 token…
             </div>
           ) : (
             <>
               <div className="mb-3 rounded-lg bg-slate-900 p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-[11px] font-medium text-slate-400">一行命令 · 含一次性 token（15 分钟内有效）</span>
+                  <span className="text-[11px] font-medium text-slate-400">一行命令 · 含绑定 token（永久有效）</span>
                   <button
                     onClick={() => {
                       navigator.clipboard?.writeText(bindCommand(enrollTok))
@@ -251,7 +251,7 @@ export function LocalCompute() {
                 <li>2 · 自动探测 claude / codex CLI，登记为执行器</li>
                 <li>3 · 回到这里（几秒后自动刷新），机器会出现在上方，点执行器「测试」验证</li>
               </ol>
-              <p className="text-[11px] text-slate-400">保持终端里的 agent 运行；关掉即离线。正式部署可做成常驻服务（launchd）。</p>
+              <p className="text-[11px] text-slate-400">保持终端里的 agent 运行；关掉即离线。断线/后端重启会自动重连，无需重新绑定。正式部署可做成常驻服务（launchd）。</p>
             </>
           )}
 

@@ -13,12 +13,6 @@ export interface AgentConnection {
   close: () => void
 }
 
-interface Enrollment {
-  token: string
-  accountId: string
-  expiresAt: number
-}
-
 interface ConnectedAgent {
   conn: AgentConnection
   machine: MachineInfo
@@ -32,29 +26,11 @@ const genId = (p: string) => `${p}-${seq++}`
 
 export class AgentGateway extends EventEmitter {
   private agents = new Map<string, ConnectedAgent>() // key: machineId
-  private pending = new Map<string, Enrollment>() // key: enroll token
 
   // ── 注册 ────────────────────────────────────────────────
-  /** 云端为某账户签发一次性、短时效的 enroll token（放进「绑定电脑」的安装命令里） */
-  issueEnrollToken(accountId: string, ttlMs = 15 * 60_000): string {
-    const token = genId('enr')
-    this.pending.set(token, { token, accountId, expiresAt: Date.now() + ttlMs })
-    return token
-  }
-
-  /** agent 用一次性 enroll token 换取 machineId + 账户组（长期 agentToken 由上层签发 JWT） */
-  enroll(token: string, machine: MachineInfo): { machineId: string; accountId: string } {
-    const e = this.pending.get(token)
-    if (!e) throw new Error('无效的 enroll token')
-    if (Date.now() > e.expiresAt) {
-      this.pending.delete(token)
-      throw new Error('enroll token 已过期')
-    }
-    this.pending.delete(token)
-    return { machineId: genId('m'), accountId: e.accountId }
-  }
-
-  /** 重连时分配新 machineId（凭长期 agentToken 验签后调用，无需一次性 token） */
+  // enroll / reenroll 的凭证校验都在上层用无状态 JWT 完成（auth.ts）；
+  // 网关只负责在校验通过后分配 machineId 并挂上连接。
+  /** 分配一个新 machineId（enroll 或 reenroll 验签通过后调用） */
   newMachineId(): string {
     return genId('m')
   }

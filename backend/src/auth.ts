@@ -49,6 +49,20 @@ export function verifyAgentToken(token: string): { orgId: string; name: string }
   }
 }
 
+// ── enroll 绑定凭证（JWT，无状态、永不过期）─────────────────────────
+// 无状态：不依赖后端内存，重启也不失效；不过期：一次生成长期可用。
+// 绑定成功后 agent 会换取长期 agentToken 走自动重连，enroll token 仅用于首次绑定。
+export const signEnrollToken = (orgId: string) => jwt.sign({ typ: 'enroll', orgId }, SECRET)
+
+export function verifyEnrollToken(token: string): { orgId: string } | null {
+  try {
+    const p = jwt.verify(token, SECRET) as { typ?: string; orgId?: string }
+    return p.typ === 'enroll' && p.orgId ? { orgId: p.orgId } : null
+  } catch {
+    return null
+  }
+}
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 // ── 高层操作 ────────────────────────────────────────────

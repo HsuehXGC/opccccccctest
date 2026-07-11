@@ -16,7 +16,9 @@ import {
   requireRoot,
   setMemberDisabled,
   signAgentToken,
+  signEnrollToken,
   verifyAgentToken,
+  verifyEnrollToken,
   type AuthedRequest,
 } from './auth.ts'
 
@@ -113,10 +115,10 @@ app.post('/api/admin/roots', requireAuth, requireRoot, (req: AuthedRequest, res)
 })
 
 // ── 本地算力（真实 agent 接入）─────────────────────────────
-// 「绑定电脑」：为当前账户组签发一次性 enroll token（放进安装命令）
+// 「绑定电脑」：为当前账户组签发 enroll token（无状态 JWT，永不过期）
 app.post('/api/machines/enroll-token', requireAuth, (req: AuthedRequest, res) => {
-  const token = gateway.issueEnrollToken(req.auth!.user.orgId)
-  res.json({ token, expiresInSec: 900 })
+  const token = signEnrollToken(req.auth!.user.orgId)
+  res.json({ token, expiresInSec: 0 }) // expiresInSec=0 表示永不过期
 })
 
 // 本账户组在线机器与执行器
@@ -236,17 +238,18 @@ wss.on('connection', (ws) => {
       // 首帧：enroll（一次性 token）或 reenroll（长期 agentToken 重连）
       const conn = (mid: string) => ({ machineId: mid, send: (m: CloudToAgent) => ws.send(JSON.stringify(m)), close: () => ws.close() })
       if (msg.t === 'enroll') {
-        try {
-          const { machineId: mid, accountId } = gateway.enroll(msg.token, msg.machine)
-          machineId = mid
-          gateway.attach(conn(mid), msg.machine, accountId)
-          const agentToken = signAgentToken(accountId, msg.machine.name)
-          ws.send(JSON.stringify({ t: 'enrolled', machineId: mid, agentToken } satisfies CloudToAgent))
-          console.log(`✓ agent enrolled: ${msg.machine.name} (${mid}) org=${accountId}`)
-        } catch (err) {
-          ws.send(JSON.stringify({ error: (err as Error).message }))
+        const e = verifyEnrollToken(msg.token)
+        if (!e) {
+          ws.send(JSON.stringify({ error: '无效的 enroll token' }))
           ws.close()
+          return
         }
+        const mid = gateway.newMachineId()
+        machineId = mid
+        gateway.attach(conn(mid), msg.machine, e.orgId)
+        const agentToken = signAgentToken(e.orgId, msg.machine.name)
+        ws.send(JSON.stringify({ t: 'enrolled', machineId: mid, agentToken } satisfies CloudToAgent))
+        console.log(`✓ agent enrolled: ${msg.machine.name} (${mid}) org=${e.orgId}`)
       } else if (msg.t === 'reenroll') {
         const p = verifyAgentToken(msg.agentToken)
         if (!p) {
