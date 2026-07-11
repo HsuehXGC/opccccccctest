@@ -73,6 +73,8 @@ interface State {
   addMemberAccount: (input: { name: string; email: string; memberRole: string }) => void
   /** 登录/切换账户组：设定当前 org 并把 currentProjectId 落到该 org 的首个项目 */
   enterOrg: (orgId: string | null) => void
+  /** 用云端 PG 的领域数据替换本账户组的本地数据（PG 为真相；只替换该 org 的切片） */
+  hydrateFromCloud: (orgId: string, payload: Partial<Record<'projects' | 'products' | 'requirements' | 'docs' | 'tasks' | 'bots' | 'meetings', unknown[]>>) => void
   switchProject: (projectId: string) => void
   addProject: (input: { name: string; description: string }) => void
   addProduct: (input: { name: string; description: string; currentVersion: string }) => string
@@ -233,6 +235,16 @@ export const useStore = create<State>()(
       const first = orgId ? s.projects.find((p) => p.orgId === orgId) : undefined
       return { currentOrgId: orgId, currentProjectId: first?.id ?? '' }
     }),
+  hydrateFromCloud: (_orgId, payload) =>
+    set((s) => ({
+      projects: (payload.projects as State['projects']) ?? s.projects,
+      products: (payload.products as State['products']) ?? s.products,
+      requirements: (payload.requirements as State['requirements']) ?? s.requirements,
+      docs: (payload.docs as State['docs']) ?? s.docs,
+      tasks: (payload.tasks as State['tasks']) ?? s.tasks,
+      bots: (payload.bots as State['bots']) ?? s.bots,
+      meetings: (payload.meetings as State['meetings']) ?? s.meetings,
+    })),
   switchProject: (currentProjectId) => set({ currentProjectId }),
   addProduct: ({ name, description, currentVersion }) => {
     const id = nextId('product')

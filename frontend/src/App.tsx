@@ -6,6 +6,7 @@ import { Avatar, cx } from './lib/ui'
 import { Toaster } from './lib/toast'
 import { CommandPalette } from './components/CommandPalette'
 import { bootstrapImport } from './lib/bootstrapImport'
+import { bootstrapCloud, startAutoSync } from './lib/cloudBridge'
 import { Dashboard } from './views/Dashboard'
 import { ProductWorkspace } from './views/ProductWorkspace'
 import { Wiki } from './views/Wiki'
@@ -41,6 +42,7 @@ export function App() {
   // 鉴权
   const authStatus = useAuth((s) => s.status)
   const authUser = useAuth((s) => s.user)
+  const authToken = useAuth((s) => s.token)
   const loadMe = useAuth((s) => s.loadMe)
   const logout = useAuth((s) => s.logout)
 
@@ -55,6 +57,12 @@ export function App() {
   useEffect(() => {
     void bootstrapImport()
   }, [])
+
+  // 登录后：云端有数据则拉下来（PG 为真相、多设备一致），随后本地改动防抖回写 PG
+  useEffect(() => {
+    if (!authToken || !authUser) return
+    void bootstrapCloud(authToken).then(() => startAutoSync())
+  }, [authToken, authUser])
 
   // 模拟机器人执行的心跳
   useEffect(() => {
