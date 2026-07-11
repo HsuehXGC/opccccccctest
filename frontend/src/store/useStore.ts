@@ -5,6 +5,10 @@ import type {
   Bot,
   BotCharter,
   BotRole,
+  Meeting,
+  MeetingKind,
+  MeetingMessage,
+  MeetingStatus,
   DocRelation,
   DocStatus,
   DocType,
@@ -28,7 +32,7 @@ import { toast } from '../lib/toast'
 import { planDecomposition } from '../lib/decompose'
 
 /** 顶层导航视图 */
-export type View = 'dashboard' | 'requirements' | 'wiki' | 'kanban' | 'workforce' | 'account'
+export type View = 'dashboard' | 'requirements' | 'wiki' | 'kanban' | 'workforce' | 'meetings' | 'account'
 
 const nextVersion = (v: string) => `v${parseInt(v.replace(/^v/, ''), 10) + 1}`
 
@@ -62,6 +66,7 @@ interface State {
   tasks: Task[]
   bots: Bot[]
   docs: WikiDoc[]
+  meetings: Meeting[]
   simRunning: boolean
 
   // 账户与项目
@@ -136,6 +141,24 @@ interface State {
   /** 配置岗位说明书 / 提示词 */
   updateBotCharter: (botId: string, charter: BotCharter) => void
 
+  // 会议
+  createMeeting: (input: {
+    title: string
+    agenda: string
+    kind: MeetingKind
+    productId: string | null
+    participantBotIds: string[]
+    references?: string
+    fullDocSlugs?: string[]
+  }) => string
+  setMeetingReferences: (meetingId: string, references: string) => void
+  addMeetingMessage: (meetingId: string, msg: Omit<MeetingMessage, 'id' | 'createdAt'>) => string
+  appendMeetingMessage: (meetingId: string, msgId: string, chunk: string) => void
+  setMeetingMessage: (meetingId: string, msgId: string, content: string) => void
+  setMeetingStatus: (meetingId: string, status: MeetingStatus) => void
+  setMeetingOutput: (meetingId: string, output: string) => void
+  removeMeeting: (meetingId: string) => void
+
   // 产品文档 Wiki
   addDoc: (input: {
     slug: string
@@ -181,6 +204,7 @@ export const useStore = create<State>()(
   tasks: seedTasks,
   bots: seedBots,
   docs: seedDocs,
+  meetings: [],
   simRunning: true,
 
   switchAccount: (currentAccountId) => set({ currentAccountId }),
@@ -490,6 +514,62 @@ export const useStore = create<State>()(
       bots: s.bots.map((b) => (b.id === botId ? { ...b, charter } : b)),
     })),
 
+  // ── 会议 ──────────────────────────────────────────────
+  createMeeting: ({ title, agenda, kind, productId, participantBotIds, references, fullDocSlugs }) => {
+    const id = nextId('meeting')
+    set((s) => {
+      const prod = productId ? s.products.find((p) => p.id === productId) : null
+      const meeting: Meeting = {
+        id,
+        orgId: s.currentOrgId ?? 'org-1',
+        projectId: prod?.projectId ?? s.currentProjectId,
+        productId: productId ?? null,
+        title,
+        agenda,
+        kind,
+        status: 'draft',
+        participantBotIds,
+        references: references ?? '',
+        fullDocSlugs: fullDocSlugs ?? [],
+        messages: [],
+        output: '',
+        createdAt: Date.now(),
+      }
+      return { meetings: [meeting, ...s.meetings] }
+    })
+    return id
+  },
+  setMeetingReferences: (meetingId, references) =>
+    set((s) => ({ meetings: s.meetings.map((m) => (m.id === meetingId ? { ...m, references } : m)) })),
+  addMeetingMessage: (meetingId, msg) => {
+    const mid = nextId('msg')
+    set((s) => ({
+      meetings: s.meetings.map((m) =>
+        m.id === meetingId ? { ...m, messages: [...m.messages, { ...msg, id: mid, createdAt: Date.now() }] } : m,
+      ),
+    }))
+    return mid
+  },
+  appendMeetingMessage: (meetingId, msgId, chunk) =>
+    set((s) => ({
+      meetings: s.meetings.map((m) =>
+        m.id === meetingId
+          ? { ...m, messages: m.messages.map((x) => (x.id === msgId ? { ...x, content: x.content + chunk } : x)) }
+          : m,
+      ),
+    })),
+  setMeetingMessage: (meetingId, msgId, content) =>
+    set((s) => ({
+      meetings: s.meetings.map((m) =>
+        m.id === meetingId ? { ...m, messages: m.messages.map((x) => (x.id === msgId ? { ...x, content } : x)) } : m,
+      ),
+    })),
+  setMeetingStatus: (meetingId, status) =>
+    set((s) => ({ meetings: s.meetings.map((m) => (m.id === meetingId ? { ...m, status } : m)) })),
+  setMeetingOutput: (meetingId, output) =>
+    set((s) => ({ meetings: s.meetings.map((m) => (m.id === meetingId ? { ...m, output } : m)) })),
+  removeMeeting: (meetingId) => set((s) => ({ meetings: s.meetings.filter((m) => m.id !== meetingId) })),
+
   addDoc: ({ slug, title, type, productId, productVersion, requirementId, ownerBotId, relations, content }) =>
     set((s) => {
       if (s.docs.some((d) => d.slug === slug)) return s
@@ -636,6 +716,7 @@ export const useStore = create<State>()(
         tasks: s.tasks,
         bots: s.bots,
         docs: s.docs,
+        meetings: s.meetings,
         simRunning: s.simRunning,
         view: s.view,
       }),

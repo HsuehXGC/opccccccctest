@@ -180,6 +180,46 @@ export interface WikiDoc {
   versions: DocVersion[]
 }
 
+// ── 会议 ───────────────────────────────────────────────
+// 虚拟人力(claude plan 模式) + 真人群聊，对项目立项/变更做 PM 讨论，
+// 产品经理会后整理出执行计划 + 会议纪要，指导后续工作。
+export type MeetingKind = 'kickoff' | 'change' | 'standup'
+export type MeetingStatus = 'draft' | 'running' | 'done'
+
+export interface MeetingMessage {
+  id: string
+  /** bot=虚拟人力 · user=真人 · system=系统 */
+  speakerType: 'bot' | 'user' | 'system'
+  speakerId: string
+  speakerName: string
+  speakerRole?: string
+  avatarSeed?: string
+  content: string
+  createdAt: number
+}
+
+export interface Meeting {
+  id: string
+  orgId: string
+  projectId: string | null
+  productId: string | null
+  title: string
+  /** 议题 / 背景 */
+  agenda: string
+  kind: MeetingKind
+  status: MeetingStatus
+  /** 参会虚拟人力 */
+  participantBotIds: string[]
+  /** 主持人补充的背景资料（自由文本，作为会议背景注入） */
+  references: string
+  /** 全文纳入知识库的文档 slug（其余文档只给摘要/标题） */
+  fullDocSlugs: string[]
+  messages: MeetingMessage[]
+  /** 产品经理会后整理的输出（执行计划 + 会议纪要，Markdown） */
+  output: string
+  createdAt: number
+}
+
 export type BotStatus = 'idle' | 'working' | 'paused' | 'offline'
 
 /** 机器人角色 / 技能画像 —— 决定它擅长哪类任务 */
