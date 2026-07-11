@@ -42,8 +42,8 @@ export class AgentGateway extends EventEmitter {
     return token
   }
 
-  /** agent 用 enroll token 换取长期 agentToken + machineId */
-  enroll(token: string, machine: MachineInfo): { machineId: string; agentToken: string; accountId: string } {
+  /** agent 用一次性 enroll token 换取 machineId + 账户组（长期 agentToken 由上层签发 JWT） */
+  enroll(token: string, machine: MachineInfo): { machineId: string; accountId: string } {
     const e = this.pending.get(token)
     if (!e) throw new Error('无效的 enroll token')
     if (Date.now() > e.expiresAt) {
@@ -51,7 +51,12 @@ export class AgentGateway extends EventEmitter {
       throw new Error('enroll token 已过期')
     }
     this.pending.delete(token)
-    return { machineId: genId('m'), agentToken: genId('tok'), accountId: e.accountId }
+    return { machineId: genId('m'), accountId: e.accountId }
+  }
+
+  /** 重连时分配新 machineId（凭长期 agentToken 验签后调用，无需一次性 token） */
+  newMachineId(): string {
+    return genId('m')
   }
 
   // ── 连接生命周期 ────────────────────────────────────────

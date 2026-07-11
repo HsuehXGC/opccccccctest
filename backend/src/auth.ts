@@ -36,6 +36,19 @@ function verifyToken(token: string): JwtPayload | null {
   }
 }
 
+// ── agent 长期凭证（JWT，支持断线/重启后重连，无需重新绑定）──────────
+export const signAgentToken = (orgId: string, name: string) =>
+  jwt.sign({ typ: 'agent', orgId, name }, SECRET, { expiresIn: '365d' })
+
+export function verifyAgentToken(token: string): { orgId: string; name: string } | null {
+  try {
+    const p = jwt.verify(token, SECRET) as { typ?: string; orgId?: string; name?: string }
+    return p.typ === 'agent' && p.orgId ? { orgId: p.orgId, name: p.name ?? '' } : null
+  } catch {
+    return null
+  }
+}
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 // ── 高层操作 ────────────────────────────────────────────

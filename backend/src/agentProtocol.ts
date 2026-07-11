@@ -22,6 +22,8 @@ export interface MachineInfo {
 // ── agent → 云端 ──────────────────────────────────────────
 export type AgentToCloud =
   | { t: 'enroll'; token: string; machine: MachineInfo }
+  // 断线/重启后凭长期 agentToken 重连，无需重新绑定
+  | { t: 'reenroll'; agentToken: string; machine: MachineInfo }
   | { t: 'heartbeat'; machineId: string; executors: ExecutorInfo[] }
   | { t: 'job:chunk'; jobId: string; stream: 'stdout' | 'stderr'; text: string }
   | { t: 'job:done'; jobId: string; exitCode: number; result: string }

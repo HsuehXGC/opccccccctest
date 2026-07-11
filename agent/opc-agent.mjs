@@ -85,64 +85,79 @@ function detectExecutors(machineId) {
 
 let machineId = null
 let hb = null
+let ws = null
+let agentToken = null // 首次 enroll 后拿到的长期凭证，用于断线/重启后自动重连
 const running = new Map() // jobId -> child process
 
-const ws = new WebSocket(URL)
-const send = (m) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(m))
+const send = (m) => ws && ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(m))
 
-ws.addEventListener('open', () => {
-  console.log(`→ 已连接 ${URL}，发送 enroll…`)
-  send({ t: 'enroll', token: TOKEN, machine: MACHINE })
-})
+function connect() {
+  ws = new WebSocket(URL)
 
-ws.addEventListener('message', (ev) => {
-  let msg
-  try {
-    msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ev.data.toString())
-  } catch {
-    return
-  }
+  ws.addEventListener('open', () => {
+    if (agentToken) {
+      console.log(`↻ 已重连 ${URL}，用长期凭证重新登记…`)
+      send({ t: 'reenroll', agentToken, machine: MACHINE })
+    } else {
+      console.log(`→ 已连接 ${URL}，发送 enroll…`)
+      send({ t: 'enroll', token: TOKEN, machine: MACHINE })
+    }
+  })
 
-  if (msg.error) {
-    console.error('✗ 云端拒绝:', msg.error)
-    process.exit(1)
-  }
+  ws.addEventListener('message', (ev) => {
+    let msg
+    try {
+      msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ev.data.toString())
+    } catch {
+      return
+    }
 
-  if (msg.t === 'enrolled') {
-    machineId = msg.machineId
-    const execs = detectExecutors(machineId)
-    console.log(`✓ 已绑定 machineId=${machineId}`)
-    console.log(`✓ 探测到执行器: ${execs.map((e) => e.label).join(', ') || '（无 claude/codex）'}`)
-    // 立即上报一次 + 每 20s 心跳
-    send({ t: 'heartbeat', machineId, executors: execs })
-    hb = setInterval(() => send({ t: 'heartbeat', machineId, executors: detectExecutors(machineId) }), 20_000)
-    return
-  }
+    if (msg.error) {
+      console.error('✗ 云端拒绝:', msg.error)
+      // 凭证失效才退出；其余错误交给重连
+      if (!agentToken || /agentToken/.test(msg.error)) process.exit(1)
+      return
+    }
 
-  if (msg.t === 'ping') {
-    send({ t: 'heartbeat', machineId, executors: detectExecutors(machineId) })
-    return
-  }
+    if (msg.t === 'enrolled') {
+      machineId = msg.machineId
+      if (msg.agentToken) agentToken = msg.agentToken
+      if (hb) clearInterval(hb)
+      const execs = detectExecutors(machineId)
+      console.log(`✓ 已登记 machineId=${machineId}`)
+      console.log(`✓ 探测到执行器: ${execs.map((e) => e.label).join(', ') || '（无 claude/codex）'}`)
+      send({ t: 'heartbeat', machineId, executors: execs })
+      hb = setInterval(() => send({ t: 'heartbeat', machineId, executors: detectExecutors(machineId) }), 20_000)
+      return
+    }
+    if (msg.t === 'ping') {
+      send({ t: 'heartbeat', machineId, executors: detectExecutors(machineId) })
+      return
+    }
+    if (msg.t === 'job:dispatch') {
+      runJob(msg)
+      return
+    }
+    if (msg.t === 'job:cancel') {
+      running.get(msg.jobId)?.kill('SIGTERM')
+      return
+    }
+  })
 
-  if (msg.t === 'job:dispatch') {
-    runJob(msg)
-    return
-  }
+  ws.addEventListener('close', () => {
+    if (hb) clearInterval(hb)
+    if (agentToken) {
+      console.error('✗ 连接断开，5 秒后自动重连…')
+      setTimeout(connect, 5000)
+    } else {
+      console.error('✗ 连接断开且未登记，退出。重新「绑定电脑」再启动。')
+      process.exit(1)
+    }
+  })
+  ws.addEventListener('error', (e) => console.error('✗ 连接错误:', e?.message || e))
+}
 
-  if (msg.t === 'job:cancel') {
-    running.get(msg.jobId)?.kill('SIGTERM')
-    return
-  }
-})
-
-ws.addEventListener('close', () => {
-  console.error('✗ 连接断开，agent 退出。重新「绑定电脑」获取新 token 再启动。')
-  if (hb) clearInterval(hb)
-  process.exit(1)
-})
-ws.addEventListener('error', (e) => {
-  console.error('✗ 连接错误:', e?.message || e)
-})
+connect()
 
 // 把 claude stream-json 的一行事件渲染成可读文本（用于流式回传）
 function renderClaudeEvent(ev) {

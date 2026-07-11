@@ -15,6 +15,8 @@ import {
   requireAuth,
   requireRoot,
   setMemberDisabled,
+  signAgentToken,
+  verifyAgentToken,
   type AuthedRequest,
 } from './auth.ts'
 
@@ -231,23 +233,33 @@ wss.on('connection', (ws) => {
       return
     }
     if (!machineId) {
-      // 首帧必须是 enroll
-      if (msg.t !== 'enroll') {
-        ws.close()
-        return
-      }
-      try {
-        const { machineId: mid, agentToken, accountId } = gateway.enroll(msg.token, msg.machine)
+      // 首帧：enroll（一次性 token）或 reenroll（长期 agentToken 重连）
+      const conn = (mid: string) => ({ machineId: mid, send: (m: CloudToAgent) => ws.send(JSON.stringify(m)), close: () => ws.close() })
+      if (msg.t === 'enroll') {
+        try {
+          const { machineId: mid, accountId } = gateway.enroll(msg.token, msg.machine)
+          machineId = mid
+          gateway.attach(conn(mid), msg.machine, accountId)
+          const agentToken = signAgentToken(accountId, msg.machine.name)
+          ws.send(JSON.stringify({ t: 'enrolled', machineId: mid, agentToken } satisfies CloudToAgent))
+          console.log(`✓ agent enrolled: ${msg.machine.name} (${mid}) org=${accountId}`)
+        } catch (err) {
+          ws.send(JSON.stringify({ error: (err as Error).message }))
+          ws.close()
+        }
+      } else if (msg.t === 'reenroll') {
+        const p = verifyAgentToken(msg.agentToken)
+        if (!p) {
+          ws.send(JSON.stringify({ error: 'agentToken 无效或过期，请重新绑定' }))
+          ws.close()
+          return
+        }
+        const mid = gateway.newMachineId()
         machineId = mid
-        gateway.attach(
-          { machineId: mid, send: (m: CloudToAgent) => ws.send(JSON.stringify(m)), close: () => ws.close() },
-          msg.machine,
-          accountId,
-        )
-        ws.send(JSON.stringify({ t: 'enrolled', machineId: mid, agentToken } satisfies CloudToAgent))
-        console.log(`✓ agent enrolled: ${msg.machine.name} (${mid}) org=${accountId}`)
-      } catch (err) {
-        ws.send(JSON.stringify({ error: (err as Error).message }))
+        gateway.attach(conn(mid), msg.machine, p.orgId)
+        ws.send(JSON.stringify({ t: 'enrolled', machineId: mid, agentToken: msg.agentToken } satisfies CloudToAgent))
+        console.log(`↻ agent reconnected: ${msg.machine.name} (${mid}) org=${p.orgId}`)
+      } else {
         ws.close()
       }
       return
