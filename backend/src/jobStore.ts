@@ -71,6 +71,15 @@ export async function requeue(id: string): Promise<void> {
   await q(`UPDATE jobs SET status='queued', executor_id=NULL, started_at=NULL WHERE id=$1`, [id])
 }
 
+/** 某账户组当前「排队中/运行中」job 关联的 refId 集合（去重 + 前端标记用） */
+export async function activeRefIds(orgId: string): Promise<string[]> {
+  const rows = await q<{ ref_id: string }>(
+    `SELECT DISTINCT ref_id FROM jobs WHERE org_id=$1 AND ref_id IS NOT NULL AND status IN ('queued','running')`,
+    [orgId],
+  )
+  return rows.map((r) => r.ref_id)
+}
+
 /** 列出某账户组的 jobs（可按 ref/status 过滤），供前端轮询 */
 export function listJobs(orgId: string, opts: { refId?: string; status?: string; limit?: number } = {}): Promise<Job[]> {
   const where = ['org_id=$1']

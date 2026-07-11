@@ -565,11 +565,15 @@ function TaskDrawer({ taskId, onClose }: { taskId: string; onClose: () => void }
 function BatchRun({ tasks }: { tasks: Task[] }) {
   const bots = useStore((s) => s.bots)
   const moveTask = useStore((s) => s.moveTask)
+  const activeJobRefs = useStore((s) => s.activeJobRefs)
   const token = useAuth((s) => s.token)
   const [busy, setBusy] = useState(false)
 
-  // 可执行 = 有负责人、未完成、且还没有真实产出（涵盖待办、卡住的进行中、无产出的待复核）
-  const runnable = tasks.filter((t) => t.botId && t.status !== 'done' && !(t.output && t.output.trim()))
+  const activeSet = new Set(activeJobRefs)
+  // 已在云端排队/运行的任务（本视图内），按钮据此显示进度、并从可执行集排除
+  const cloudRunning = tasks.filter((t) => activeSet.has(t.id)).length
+  // 可执行 = 有负责人、未完成、无真实产出、且当前云端没有在跑（避免重复入队）
+  const runnable = tasks.filter((t) => t.botId && t.status !== 'done' && !(t.output && t.output.trim()) && !activeSet.has(t.id))
 
   async function runAll() {
     if (busy || !token) return
@@ -594,12 +598,23 @@ function BatchRun({ tasks }: { tasks: Task[] }) {
         .filter(Boolean)
       await authApi.enqueueJobs(token, jobs as unknown[])
       runnable.forEach((t) => moveTask(t.id, 'in_progress'))
+      // 乐观标记为云端活跃：立刻让按钮变「云端执行中」，避免重复入队（下次轮询会对账）
+      useStore.getState().setActiveJobRefs([...new Set([...activeJobRefs, ...runnable.map((t) => t.id)])])
       toast(`已入队 ${jobs.length} 个任务到云端调度，后端执行中——关页面/刷新都不影响，完成后自动进「待复核」`, 'success')
     } catch (err) {
       toast('入队失败：' + (err as Error).message, 'warn')
     } finally {
       setBusy(false)
     }
+  }
+
+  // 无可执行、但云端有在跑 → 显示进度态（禁用，避免重复入队）
+  if (cloudRunning > 0 && runnable.length === 0) {
+    return (
+      <span className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-soft px-3.5 py-2 text-sm font-medium text-brand" title="任务在云端后台执行中，关页面/刷新都不影响">
+        <Loader2 size={15} className="animate-spin" /> 云端执行中 ({cloudRunning})
+      </span>
+    )
   }
 
   return (
@@ -610,7 +625,7 @@ function BatchRun({ tasks }: { tasks: Task[] }) {
       className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-50"
     >
       {busy ? <Loader2 size={15} className="animate-spin" /> : <Rocket size={15} />}
-      {busy ? '入队中…' : `执行任务${runnable.length ? ` (${runnable.length})` : ''}`}
+      {busy ? '入队中…' : `执行任务${runnable.length ? ` (${runnable.length})` : ''}${cloudRunning ? ` · 云端跑 ${cloudRunning}` : ''}`}
     </button>
   )
 }

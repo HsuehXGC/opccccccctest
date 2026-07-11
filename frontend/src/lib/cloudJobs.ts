@@ -6,6 +6,9 @@ import type { CloudJob } from './authApi'
 export function applyJobs(jobs: CloudJob[]): void {
   applyJobsToTasks(jobs.filter((j) => j.ref_type === 'task'))
   applyDocJobs(jobs.filter((j) => j.ref_type === 'doc'))
+  // 记录仍在「排队中/运行中」的 refId，供 UI 排除、避免重复入队
+  const active = jobs.filter((j) => (j.status === 'queued' || j.status === 'running') && j.ref_id).map((j) => j.ref_id as string)
+  useStore.getState().setActiveJobRefs([...new Set(active)])
 }
 
 // 文档撰写 job 完成 → 若本地还没有该文档，据 job.meta + 产出建文档

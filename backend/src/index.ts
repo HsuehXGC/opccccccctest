@@ -7,10 +7,10 @@ import type { AgentToCloud, CloudToAgent } from './agentProtocol.ts'
 import { initStore } from './authStore.ts'
 import { migrate, dbEnabled } from './db.ts'
 import { startScheduler } from './scheduler.ts'
-import { createJob, listJobs, getJob } from './jobStore.ts'
+import { createJob, listJobs, getJob, activeRefIds } from './jobStore.ts'
 import { importSnapshot, getOrgState, orgHasData } from './stateStore.ts'
 import { orchestrateMeeting, getMeeting, isMeetingRunning, orgHasExecutor, recoverMeetings, type MeetingRunPayload } from './meetingRunner.ts'
-import { addBusConn } from './bus.ts'
+import { addBusConn, notifyOrg } from './bus.ts'
 import {
   changePassword,
   createMember,
@@ -249,9 +249,14 @@ app.post('/api/jobs', requireAuth, async (req: AuthedRequest, res) => {
   const list = Array.isArray(req.body?.jobs) ? req.body.jobs : []
   if (list.length === 0) return res.status(400).json({ error: 'jobs 为空' })
   try {
+    // 去重：对已有「排队中/运行中」job 的 refId 跳过，防双击/多设备重复入队
+    const active = new Set(await activeRefIds(orgId))
     const created = []
+    let skipped = 0
     for (const j of list) {
       if (!j?.prompt) continue
+      if (j.refId && active.has(j.refId)) { skipped++; continue }
+      if (j.refId) active.add(j.refId) // 同一批内也去重
       created.push(
         await createJob({
           orgId,
@@ -265,7 +270,8 @@ app.post('/api/jobs', requireAuth, async (req: AuthedRequest, res) => {
         }),
       )
     }
-    res.json({ ok: true, jobs: created.map((c) => ({ id: c.id, refId: c.ref_id, status: c.status })) })
+    if (created.length) notifyOrg(orgId, 'jobs') // 入队即推，客户端立刻标记「云端执行中」
+    res.json({ ok: true, jobs: created.map((c) => ({ id: c.id, refId: c.ref_id, status: c.status })), skipped })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }

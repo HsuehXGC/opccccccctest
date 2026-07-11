@@ -92,6 +92,9 @@ interface State {
   focusTaskId: string | null
   openTask: (taskId: string) => void
   clearFocusTask: () => void
+  /** 云端有「排队中/运行中」job 的 refId（任务/文档）——避免重复入队；瞬态不持久化 */
+  activeJobRefs: string[]
+  setActiveJobRefs: (refs: string[]) => void
   /** 请求需求工作台定位到某产品 */
   focusProductId: string | null
   openProduct: (productId: string) => void
@@ -299,6 +302,9 @@ export const useStore = create<State>()(
       return { view: 'kanban', focusTaskId: taskId, currentProjectId: prod?.projectId ?? s.currentProjectId }
     }),
   clearFocusTask: () => set({ focusTaskId: null }),
+  activeJobRefs: [],
+  setActiveJobRefs: (refs) =>
+    set((s) => (s.activeJobRefs.length === refs.length && s.activeJobRefs.every((r, i) => r === refs[i]) ? {} : { activeJobRefs: refs })),
   focusProductId: null,
   openProduct: (productId) =>
     set((s) => {
