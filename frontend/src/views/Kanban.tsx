@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { UserPlus, Terminal, FileText, Wrench, Lock, X, GitBranch, Plus, ExternalLink, ClipboardList, Rocket, Loader2, Cpu, Sparkles } from 'lucide-react'
+import { UserPlus, Terminal, FileText, Wrench, Lock, X, GitBranch, Plus, ExternalLink, ClipboardList, Rocket, Loader2, Cpu, Sparkles, Check } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useAuth } from '../store/useAuth'
 import { authApi, runExecutorStream, type LiveMachine } from '../lib/authApi'
@@ -566,11 +566,13 @@ function BatchRun({ tasks }: { tasks: Task[] }) {
   const bots = useStore((s) => s.bots)
   const recordTaskRun = useStore((s) => s.recordTaskRun)
   const moveTask = useStore((s) => s.moveTask)
+  const setBotStatus = useStore((s) => s.setBotStatus)
   const token = useAuth((s) => s.token)
   const [running, setRunning] = useState(false)
   const [prog, setProg] = useState<{ i: number; total: number; title: string } | null>(null)
 
-  const runnable = tasks.filter((t) => t.botId && t.status !== 'done')
+  // 可执行 = 有负责人、未完成、且还没有真实产出（涵盖待办、卡住的进行中、无产出的待复核）
+  const runnable = tasks.filter((t) => t.botId && t.status !== 'done' && !(t.output && t.output.trim()))
 
   async function pickExec(): Promise<string | null> {
     if (!token) return null
@@ -613,17 +615,19 @@ function BatchRun({ tasks }: { tasks: Task[] }) {
           else if (e.t === 'error') acc = (acc + '\n⚠️ ' + e.error).trim()
         })
         recordTaskRun(t.id, { output: acc, ok: true })
-        moveTask(t.id, 'done')
+        moveTask(t.id, 'review')
+        if (t.botId) setBotStatus(t.botId, 'idle')
         ok++
       } catch (err) {
         recordTaskRun(t.id, { output: '', ok: false })
         moveTask(t.id, 'backlog')
+        if (t.botId) setBotStatus(t.botId, 'idle')
         fail++
       }
     }
     setProg(null)
     setRunning(false)
-    toast(`任务执行完成：成功 ${ok}${fail ? ` · 失败 ${fail}` : ''}`, fail ? 'warn' : 'success')
+    toast(`执行完成：${ok} 项已产出，进入「待复核」${fail ? ` · 失败 ${fail}` : ''}`, fail ? 'warn' : 'success')
   }
 
   return (
@@ -635,6 +639,25 @@ function BatchRun({ tasks }: { tasks: Task[] }) {
     >
       {running ? <Loader2 size={15} className="animate-spin" /> : <Rocket size={15} />}
       {running && prog ? `执行中 ${prog.i + 1}/${prog.total} · ${prog.title.slice(0, 12)}` : `执行任务${runnable.length ? ` (${runnable.length})` : ''}`}
+    </button>
+  )
+}
+
+// ── 复核通过：把「待复核且有真实产出」的任务批量通过为完成 ──
+function ReviewApprove({ tasks }: { tasks: Task[] }) {
+  const moveTask = useStore((s) => s.moveTask)
+  const approvable = tasks.filter((t) => t.status === 'review' && t.output && t.output.trim())
+  if (approvable.length === 0) return null
+  return (
+    <button
+      onClick={() => {
+        approvable.forEach((t) => moveTask(t.id, 'done'))
+        toast(`已复核通过 ${approvable.length} 项，移入「完成」`, 'success')
+      }}
+      title="把已产出、待复核的任务批量通过为完成"
+      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3.5 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-50"
+    >
+      <Check size={15} /> 复核通过 ({approvable.length})
     </button>
   )
 }
@@ -764,6 +787,7 @@ export function Kanban() {
           </select>
           <AiAssign tasks={filtered} />
           <BatchRun tasks={filtered} />
+          <ReviewApprove tasks={filtered} />
         </div>
       </header>
 

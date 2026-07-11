@@ -28,7 +28,6 @@ import { seedBots, seedRequirements, seedTasks } from '../mock/data'
 import { seedDocs } from '../mock/docs'
 import { seedProducts } from '../mock/products'
 import { seedAccounts, seedExecutors, seedMachines, seedProjects } from '../mock/accounts'
-import { toast } from '../lib/toast'
 import { planDecomposition } from '../lib/decompose'
 
 /** 顶层导航视图 */
@@ -670,37 +669,27 @@ export const useStore = create<State>()(
 
   toggleSim: (on) => set({ simRunning: on }),
 
-  // 每个 tick 推进所有「工作中」机器人的任务进度，并滚动日志
+  // 进度动画：仅为「进行中」任务轻微推进进度条做视觉反馈。
+  // 注意：不再自动把任务「假完成」到待复核——任务的完成与状态流转由真实派单执行负责，
+  // 否则模拟引擎会把真执行中的任务误判为完成，产生无产出的「待复核」脏数据。
   tick: () => {
     if (!get().simRunning) return
-    const finishedTitles: string[] = []
     set((s) => {
-      const finished: string[] = []
+      let changed = false
       const tasks = s.tasks.map((t) => {
         const bot = s.bots.find((b) => b.id === t.botId && b.status === 'working')
-        if (!bot || t.status !== 'in_progress') return t
-        const inc = 3 + Math.floor(Math.random() * 7)
-        const progress = Math.min(100, t.progress + inc)
+        // 只动「进行中、还没真实产出」的任务，且封顶 90%，绝不自动完成
+        if (!bot || t.status !== 'in_progress' || (t.output && t.output.trim()) || t.progress >= 90) return t
+        changed = true
+        const progress = Math.min(90, t.progress + 3 + Math.floor(Math.random() * 6))
         const log =
-          Math.random() > 0.55
+          Math.random() > 0.6
             ? [...t.log, WORK_LOG_SNIPPETS[Math.floor(Math.random() * WORK_LOG_SNIPPETS.length)]].slice(-8)
             : t.log
-        if (progress >= 100) {
-          finished.push(t.id)
-          finishedTitles.push(t.title)
-          return { ...t, progress: 100, status: 'review' as TaskStatus, log: [...log, '✓ 执行完成，待复核'].slice(-8) }
-        }
         return { ...t, progress, log }
       })
-      const bots = s.bots.map((b) =>
-        b.currentTaskId && finished.includes(b.currentTaskId)
-          ? { ...b, status: 'idle' as const, currentTaskId: null, completed: b.completed + 1 }
-          : b,
-      )
-      return { tasks, bots }
+      return changed ? { tasks } : {}
     })
-    // set 之后再弹反馈，避免在更新期触发跨 store 副作用
-    finishedTitles.forEach((title) => toast(`「${title}」执行完成，待复核`, 'info'))
   },
     }),
     {
