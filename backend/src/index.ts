@@ -1,7 +1,9 @@
 import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
+import { WebSocketServer } from 'ws'
 import { gateway } from './agentGateway.ts'
+import type { AgentToCloud, CloudToAgent } from './agentProtocol.ts'
 import { initStore } from './authStore.ts'
 import {
   changePassword,
@@ -108,53 +110,91 @@ app.post('/api/admin/roots', requireAuth, requireRoot, (req: AuthedRequest, res)
   }
 })
 
-// 「绑定电脑」：为当前账户签发一次性 enroll token（放进安装命令）
-app.post('/api/machines/enroll-token', (req, res) => {
-  const accountId = req.body?.accountId
-  if (!accountId) return res.status(400).json({ error: 'accountId 必填' })
-  const token = gateway.issueEnrollToken(accountId)
+// ── 本地算力（真实 agent 接入）─────────────────────────────
+// 「绑定电脑」：为当前账户组签发一次性 enroll token（放进安装命令）
+app.post('/api/machines/enroll-token', requireAuth, (req: AuthedRequest, res) => {
+  const token = gateway.issueEnrollToken(req.auth!.user.orgId)
   res.json({ token, expiresInSec: 900 })
 })
 
-// agent 注册（真实实现里由 /agent WebSocket 首帧 enroll 触发；此处提供 HTTP 备用）
-app.post('/api/agent/enroll', (req, res) => {
-  const { token, machine } = req.body ?? {}
-  if (!token || !machine) return res.status(400).json({ error: 'token 和 machine 必填' })
-  try {
-    res.json(gateway.enroll(token, machine))
-  } catch (err) {
-    res.status(400).json({ error: (err as Error).message })
+// 本账户组在线机器与执行器
+app.get('/api/machines', requireAuth, (req: AuthedRequest, res) => {
+  const orgId = req.auth!.user.orgId
+  res.json({ machines: gateway.listMachines().filter((m) => m.accountId === orgId) })
+})
+
+// 删除（解绑）一台机器：关闭其 agent 连接并移除。仅限本账户组。
+app.delete('/api/machines/:machineId', requireAuth, (req: AuthedRequest, res) => {
+  const machineId = String(req.params.machineId)
+  if (gateway.orgOf(machineId) !== req.auth!.user.orgId) {
+    return res.status(404).json({ error: '机器不存在或不属于你的账户组' })
   }
+  gateway.remove(machineId)
+  res.json({ ok: true })
 })
 
-// 在线机器与执行器
-app.get('/api/machines', (_req, res) => {
-  res.json({ machines: gateway.listMachines() })
-})
-
-// 派单：把任务简报下发到某执行器（= 某台电脑上的 claude -p）
-app.post('/api/tasks/:taskId/dispatch', (req, res) => {
-  const { executorId, prompt } = req.body ?? {}
+/** 在某执行器上跑一段 prompt 并等待结果（= 该电脑上的 claude -p）。仅限本账户组的执行器。 */
+app.post('/api/agent/run', requireAuth, async (req: AuthedRequest, res) => {
+  const { executorId, prompt, cwd } = req.body ?? {}
   if (!executorId || !prompt) return res.status(400).json({ error: 'executorId 和 prompt 必填' })
+  const orgId = req.auth!.user.orgId
+  const owner = gateway.listMachines().find((m) => m.accountId === orgId && m.executors.some((e) => e.id === executorId))
+  if (!owner) return res.status(404).json({ error: '执行器不在线或不属于你的账户组' })
   try {
-    res.json({ dispatched: true, ...gateway.dispatch(executorId, prompt) })
+    const out = await gateway.runJob(executorId, prompt, cwd)
+    res.json({ ok: true, ...out })
   } catch (err) {
-    res.status(409).json({ error: (err as Error).message })
+    res.status(502).json({ error: (err as Error).message })
   }
 })
-
-// 实时执行流（Server-Sent Events）——把 agent 回传的 job 事件推给前端
-app.get('/api/stream', (_req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' })
-  const onJob = (e: unknown) => res.write(`data: ${JSON.stringify(e)}\n\n`)
-  gateway.on('job', onJob)
-  res.on('close', () => gateway.off('job', onJob))
-})
-
-// TODO(M2): const wss = new WebSocketServer({ server, path: '/agent' })
-//   wss.on('connection', ws => { /* enroll → gateway.attach → ws.on('message', m => gateway.handle(id, m)) */ })
 
 const PORT = Number(process.env.PORT) || 8787
-app.listen(PORT, () => {
-  console.log(`✓ OPC backend (agent gateway) on http://localhost:${PORT}`)
+const server = app.listen(PORT, () => {
+  console.log(`✓ OPC backend (auth + agent gateway) on http://localhost:${PORT}`)
+})
+
+// ── /agent WebSocket：内网 agent 出站接入的落点 ───────────────
+// agent 出站建 wss 长连接 → 首帧 enroll → attach → heartbeat / job 回传中继。
+const wss = new WebSocketServer({ server, path: '/agent' })
+wss.on('connection', (ws) => {
+  let machineId: string | null = null
+  ws.on('message', (raw) => {
+    let msg: AgentToCloud
+    try {
+      msg = JSON.parse(raw.toString())
+    } catch {
+      return
+    }
+    if (!machineId) {
+      // 首帧必须是 enroll
+      if (msg.t !== 'enroll') {
+        ws.close()
+        return
+      }
+      try {
+        const { machineId: mid, agentToken, accountId } = gateway.enroll(msg.token, msg.machine)
+        machineId = mid
+        gateway.attach(
+          { machineId: mid, send: (m: CloudToAgent) => ws.send(JSON.stringify(m)), close: () => ws.close() },
+          msg.machine,
+          accountId,
+        )
+        ws.send(JSON.stringify({ t: 'enrolled', machineId: mid, agentToken } satisfies CloudToAgent))
+        console.log(`✓ agent enrolled: ${msg.machine.name} (${mid}) org=${accountId}`)
+      } catch (err) {
+        ws.send(JSON.stringify({ error: (err as Error).message }))
+        ws.close()
+      }
+      return
+    }
+    gateway.handle(machineId, msg)
+  })
+  const drop = () => {
+    if (machineId) {
+      gateway.detach(machineId)
+      console.log(`✗ agent disconnected: ${machineId}`)
+    }
+  }
+  ws.on('close', drop)
+  ws.on('error', drop)
 })

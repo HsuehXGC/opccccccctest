@@ -63,6 +63,24 @@ export class AgentGateway extends EventEmitter {
     this.agents.delete(machineId)
   }
 
+  /** 主动移除一台机器：关闭其连接（agent 随之退出）并从网关删除 */
+  remove(machineId: string): boolean {
+    const agent = this.agents.get(machineId)
+    if (!agent) return false
+    try {
+      agent.conn.close()
+    } catch {
+      /* 忽略关闭异常 */
+    }
+    this.agents.delete(machineId)
+    return true
+  }
+
+  /** 查某机器归属的账户组（用于越权校验） */
+  orgOf(machineId: string): string | undefined {
+    return this.agents.get(machineId)?.accountId
+  }
+
   /** 处理 agent 上行消息 */
   handle(machineId: string, msg: AgentToCloud) {
     const agent = this.agents.get(machineId)
@@ -100,6 +118,41 @@ export class AgentGateway extends EventEmitter {
 
   cancel(machineId: string, jobId: string) {
     this.agents.get(machineId)?.conn.send({ t: 'job:cancel', jobId })
+  }
+
+  /** 派单并等待完成（同步语义）：收集流式输出，job:done 时 resolve，error/超时 reject */
+  runJob(executorId: string, prompt: string, cwd?: string, timeoutMs = 120_000): Promise<{ jobId: string; result: string }> {
+    return new Promise((resolve, reject) => {
+      let jobId = ''
+      let out = ''
+      const onJob = (e: JobEvent) => {
+        if (e.jobId !== jobId) return
+        if (e.type === 'chunk') out += e.text
+        else if (e.type === 'done') {
+          cleanup()
+          resolve({ jobId, result: e.result || out })
+        } else if (e.type === 'error') {
+          cleanup()
+          reject(new Error(e.error))
+        }
+      }
+      const timer = setTimeout(() => {
+        cleanup()
+        reject(new Error('执行超时'))
+      }, timeoutMs)
+      const cleanup = () => {
+        this.off('job', onJob)
+        clearTimeout(timer)
+      }
+      try {
+        jobId = this.dispatch(executorId, prompt, cwd).jobId
+      } catch (err) {
+        cleanup()
+        reject(err as Error)
+        return
+      }
+      this.on('job', onJob)
+    })
   }
 
   // ── 查询 ────────────────────────────────────────────────

@@ -44,4 +44,26 @@ export const authApi = {
     req<{ ok: true }>('/auth/password', { method: 'POST', body, token }),
   setMemberDisabled: (token: string, id: string, disabled: boolean) =>
     req<{ user: AuthUser }>(`/org/members/${id}/disabled`, { method: 'POST', body: { disabled }, token }),
+
+  // 本地算力（真实 agent）
+  machines: (token: string) => req<{ machines: LiveMachine[] }>('/machines', { token }),
+  enrollToken: (token: string) => req<{ token: string; expiresInSec: number }>('/machines/enroll-token', { method: 'POST', token }),
+  runExecutor: (token: string, body: { executorId: string; prompt: string }) =>
+    req<{ ok: true; jobId: string; result: string }>('/agent/run', { method: 'POST', body, token }),
+  removeMachine: (token: string, machineId: string) =>
+    req<{ ok: true }>(`/machines/${machineId}`, { method: 'DELETE', token }),
+}
+
+export interface LiveExecutor {
+  id: string
+  kind: 'claude' | 'codex'
+  label: string
+  status: 'idle' | 'busy' | 'offline'
+}
+export interface LiveMachine {
+  machineId: string
+  machine: { name: string; os: string; hostname: string }
+  accountId: string
+  executors: LiveExecutor[]
+  online: boolean
 }
