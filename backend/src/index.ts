@@ -5,6 +5,9 @@ import { WebSocketServer } from 'ws'
 import { gateway } from './agentGateway.ts'
 import type { AgentToCloud, CloudToAgent } from './agentProtocol.ts'
 import { initStore } from './authStore.ts'
+import { migrate, dbEnabled } from './db.ts'
+import { startScheduler } from './scheduler.ts'
+import { createJob, listJobs, getJob } from './jobStore.ts'
 import {
   changePassword,
   createMember,
@@ -31,6 +34,15 @@ import {
 //           AgentConnection 交给 gateway；派单走 gateway.dispatch()。
 
 initStore()
+
+// 云端持久层 + 常驻调度器（关页面不中断的核心）
+if (dbEnabled) {
+  migrate()
+    .then(startScheduler)
+    .catch((e) => console.error('✗ DB 初始化失败：', (e as Error).message))
+} else {
+  console.warn('⚠ 未配置 DATABASE_URL，云端调度未启用（仍可用旧的前端直连派单）')
+}
 
 const app = express()
 app.use(cors())
@@ -219,6 +231,57 @@ app.post('/api/agent/run-stream', requireAuth, (req: AuthedRequest, res) => {
     clearTimeout(idle)
     gateway.off('job', onJob)
   })
+})
+
+// ── 云端调度 jobs：入队后由后端 worker 常驻执行，关页面不中断 ──────────
+// 入队一批 job（前端把要跑的任务/发言拼好 prompt 后提交）
+app.post('/api/jobs', requireAuth, async (req: AuthedRequest, res) => {
+  if (!dbEnabled) return res.status(503).json({ error: '云端调度未启用（后端缺 DATABASE_URL）' })
+  const orgId = req.auth!.user.orgId
+  const list = Array.isArray(req.body?.jobs) ? req.body.jobs : []
+  if (list.length === 0) return res.status(400).json({ error: 'jobs 为空' })
+  try {
+    const created = []
+    for (const j of list) {
+      if (!j?.prompt) continue
+      created.push(
+        await createJob({
+          orgId,
+          kind: String(j.kind ?? 'adhoc'),
+          refType: j.refType ?? null,
+          refId: j.refId ?? null,
+          title: j.title ?? '',
+          prompt: String(j.prompt),
+          mode: j.mode ?? null,
+        }),
+      )
+    }
+    res.json({ ok: true, jobs: created.map((c) => ({ id: c.id, refId: c.ref_id, status: c.status })) })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+// 查询本账户组的 jobs（?refId= / ?status=），前端轮询进度
+app.get('/api/jobs', requireAuth, async (req: AuthedRequest, res) => {
+  if (!dbEnabled) return res.json({ jobs: [] })
+  try {
+    const jobs = await listJobs(req.auth!.user.orgId, {
+      refId: req.query.refId ? String(req.query.refId) : undefined,
+      status: req.query.status ? String(req.query.status) : undefined,
+    })
+    res.json({ jobs })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+// 单个 job 详情
+app.get('/api/jobs/:id', requireAuth, async (req: AuthedRequest, res) => {
+  if (!dbEnabled) return res.status(404).json({ error: '未启用' })
+  const job = await getJob(String(req.params.id))
+  if (!job || job.org_id !== req.auth!.user.orgId) return res.status(404).json({ error: 'job 不存在' })
+  res.json({ job })
 })
 
 const PORT = Number(process.env.PORT) || 8787
