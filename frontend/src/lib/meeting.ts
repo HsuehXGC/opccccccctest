@@ -97,6 +97,37 @@ export function buildProjectKnowledge(input: {
   return out
 }
 
+/** 从产品经理输出的「执行计划」段解析出候选任务（列表/编号项） */
+export function parseMeetingPlan(output: string): { title: string; detail: string }[] {
+  if (!output) return []
+  const lines = output.split('\n')
+  const items: { title: string; detail: string }[] = []
+  const pick = (from: string[]) => {
+    for (const raw of from) {
+      const m = raw.trim().match(/^([-*]|\d+[.、])\s+(.+)$/)
+      if (m) {
+        const text = m[2].replace(/\*\*/g, '').replace(/`/g, '').trim()
+        if (text.length > 2) items.push({ title: text.slice(0, 60), detail: text })
+      }
+    }
+  }
+  // 先取「执行计划」段
+  let start = -1
+  let end = lines.length
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i].trim()
+    if (start < 0 && /^#{1,4}.*执行计划/.test(l)) start = i + 1
+    else if (start >= 0 && /^#{1,4}.*(会议纪要|纪要)/.test(l)) {
+      end = i
+      break
+    }
+  }
+  if (start >= 0) pick(lines.slice(start, end))
+  // 退回：整篇的列表项
+  if (items.length === 0) pick(lines)
+  return items.slice(0, 30)
+}
+
 function transcript(messages: MeetingMessage[]): string {
   if (messages.length === 0) return '（暂无发言）'
   return messages

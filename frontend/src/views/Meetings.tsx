@@ -1,14 +1,14 @@
 import { useMemo, useState } from 'react'
-import { Users, Plus, Play, Loader2, Send, Sparkles, Trash2, FileText, ArrowLeft, Bot as BotIcon, ClipboardList } from 'lucide-react'
+import { Users, Plus, Play, Loader2, Send, Sparkles, Trash2, FileText, ArrowLeft, Bot as BotIcon, ClipboardList, ListPlus } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useAuth } from '../store/useAuth'
 import { authApi, runExecutorStream } from '../lib/authApi'
-import { botTurnPrompt, pmConsolidatePrompt, buildProjectKnowledge, MEETING_KIND } from '../lib/meeting'
+import { botTurnPrompt, pmConsolidatePrompt, buildProjectKnowledge, parseMeetingPlan, MEETING_KIND } from '../lib/meeting'
 import { renderMarkdown } from '../lib/markdown'
-import { Avatar, cx } from '../lib/ui'
+import { Avatar, cx, DOC_TYPE, DOC_TYPE_ORDER } from '../lib/ui'
 import { Modal, Field, inputCls } from '../components/Modal'
 import { toast } from '../lib/toast'
-import type { Bot, Meeting, MeetingKind, Product } from '../types'
+import type { Bot, DocType, Meeting, MeetingKind, Product } from '../types'
 
 const KIND_CLS: Record<MeetingKind, string> = {
   kickoff: 'bg-indigo-100 text-indigo-700',
@@ -127,6 +127,145 @@ function CreateMeeting({ orgBots, products, onClose, onCreated }: { orgBots: Bot
   )
 }
 
+// ── 据会议执行计划生成任务 ───────────────────────────────
+function GenTasksModal({ meeting, products, defaultProductId, onClose }: { meeting: Meeting; products: Product[]; defaultProductId: string | null; onClose: () => void }) {
+  const addTask = useStore((s) => s.addTask)
+  const items = useMemo(() => parseMeetingPlan(meeting.output), [meeting.output])
+  const [checked, setChecked] = useState<boolean[]>(() => items.map(() => true))
+  const [productId, setProductId] = useState<string | null>(defaultProductId)
+  const n = checked.filter(Boolean).length
+
+  function create() {
+    let count = 0
+    items.forEach((it, i) => {
+      if (!checked[i]) return
+      addTask({
+        title: it.title,
+        description: '',
+        priority: 'medium',
+        requirementId: null,
+        kind: 'work',
+        productId,
+        brief: `${it.detail}\n\n（来源：会议「${meeting.title}」）`,
+      })
+      count++
+    })
+    toast(`已生成 ${count} 个任务到看板`)
+    onClose()
+  }
+
+  return (
+    <Modal open onClose={onClose} title="据会议执行计划生成任务">
+      {items.length === 0 ? (
+        <p className="py-4 text-sm text-slate-400">未能从会议输出的「执行计划」里解析出任务项。可手动到看板新建。</p>
+      ) : (
+        <>
+          <Field label="归属产品">
+            <select className={inputCls} value={productId ?? ''} onChange={(e) => setProductId(e.target.value || null)}>
+              <option value="">（不指定产品）</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">选择要生成的任务 · {n}/{items.length}</div>
+          <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
+            {items.map((it, i) => (
+              <label key={i} className="flex cursor-pointer items-start gap-2 rounded px-1.5 py-1 text-sm hover:bg-slate-50">
+                <input type="checkbox" checked={checked[i]} onChange={() => setChecked((c) => c.map((v, j) => (j === i ? !v : v)))} className="mt-1 accent-brand" />
+                <span>{it.title}</span>
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+      <div className="mt-4 flex justify-end gap-2">
+        <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100">
+          取消
+        </button>
+        {items.length > 0 && (
+          <button
+            onClick={create}
+            disabled={n === 0}
+            className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            生成 {n} 个任务
+          </button>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
+// ── 会议纪要存为产品文档 ─────────────────────────────────
+function SaveDocModal({ meeting, products, defaultProductId, ownerBotId, onClose }: { meeting: Meeting; products: Product[]; defaultProductId: string | null; ownerBotId: string | null; onClose: () => void }) {
+  const addDoc = useStore((s) => s.addDoc)
+  const openDoc = useStore((s) => s.openDoc)
+  const [productId, setProductId] = useState<string | null>(defaultProductId)
+  const [title, setTitle] = useState(`${meeting.title} · 会议纪要`)
+  const [type, setType] = useState<DocType>('adr')
+  const product = products.find((p) => p.id === productId)
+
+  function save() {
+    if (!productId || !product) {
+      toast('请先选择归属产品', 'warn')
+      return
+    }
+    const slug = `mtg-${Math.random().toString(36).slice(2, 10)}`
+    addDoc({
+      slug,
+      title: title.trim() || `${meeting.title} · 会议纪要`,
+      type,
+      productId,
+      productVersion: product.currentVersion,
+      requirementId: null,
+      ownerBotId,
+      content: meeting.output,
+    })
+    toast('已存为产品文档')
+    onClose()
+    openDoc(productId, slug)
+  }
+
+  return (
+    <Modal open onClose={onClose} title="会议纪要存为产品文档">
+      <Field label="归属产品">
+        <select className={inputCls} value={productId ?? ''} onChange={(e) => setProductId(e.target.value || null)}>
+          <option value="">选择产品…</option>
+          {products.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}（{p.currentVersion}）
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="文档标题">
+        <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} />
+      </Field>
+      <Field label="文档类型">
+        <select className={inputCls} value={type} onChange={(e) => setType(e.target.value as DocType)}>
+          {DOC_TYPE_ORDER.map((t) => (
+            <option key={t} value={t}>
+              {DOC_TYPE[t].label}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <p className="text-[11px] text-slate-400">将以会议输出（执行计划 + 纪要）为正文，在产品文档中心创建一篇 v1 文档，之后可走版本流迭代。</p>
+      <div className="mt-4 flex justify-end gap-2">
+        <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100">
+          取消
+        </button>
+        <button onClick={save} className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">
+          存为文档
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 // ── 会议室 ───────────────────────────────────────────────
 function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => void }) {
   const meeting = useStore((s) => s.meetings.find((m) => m.id === meetingId))
@@ -148,6 +287,8 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
   const [speaking, setSpeaking] = useState<string | null>(null)
   const [consolidating, setConsolidating] = useState(false)
   const [draft, setDraft] = useState('')
+  const [genOpen, setGenOpen] = useState(false)
+  const [saveDocOpen, setSaveDocOpen] = useState(false)
 
   if (!meeting) return null
   const product = meeting.productId ? products.find((p) => p.id === meeting.productId) ?? null : null
@@ -372,6 +513,22 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
           <div className="mb-2 flex items-center gap-1.5 text-sm font-bold text-brand">
             <ClipboardList size={15} /> 会议输出 · 由产品经理 {pm?.name} 整理
             {consolidating && <Loader2 size={13} className="animate-spin" />}
+            {meeting.output && !consolidating && (
+              <div className="ml-auto flex gap-1.5">
+                <button
+                  onClick={() => setSaveDocOpen(true)}
+                  className="flex items-center gap-1 rounded-lg border border-brand/40 px-2.5 py-1 text-xs font-medium text-brand hover:bg-brand-soft"
+                >
+                  <FileText size={13} /> 存为文档
+                </button>
+                <button
+                  onClick={() => setGenOpen(true)}
+                  className="flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+                >
+                  <ListPlus size={13} /> 据此生成任务
+                </button>
+              </div>
+            )}
           </div>
           {meeting.output ? (
             <div
@@ -382,6 +539,11 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
             <p className="text-sm text-slate-400">整理中…</p>
           )}
         </div>
+      )}
+
+      {genOpen && <GenTasksModal meeting={meeting} products={projectProducts} defaultProductId={meeting.productId ?? projectProducts[0]?.id ?? null} onClose={() => setGenOpen(false)} />}
+      {saveDocOpen && (
+        <SaveDocModal meeting={meeting} products={projectProducts} defaultProductId={meeting.productId ?? projectProducts[0]?.id ?? null} ownerBotId={pm?.id ?? null} onClose={() => setSaveDocOpen(false)} />
       )}
     </div>
   )
