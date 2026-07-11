@@ -27,6 +27,7 @@ function CreateMeeting({ orgBots, products, onClose, onCreated }: { orgBots: Bot
   const [picked, setPicked] = useState<string[]>(orgBots.filter((b) => ['产品经理', '项目经理'].includes(b.role)).map((b) => b.id))
   const [references, setReferences] = useState('')
   const [fullDocs, setFullDocs] = useState<string[]>([])
+  const [parallel, setParallel] = useState(false)
 
   const productIds = new Set(products.map((p) => p.id))
   const projectDocs = allDocs.filter((d) => productIds.has(d.productId))
@@ -107,6 +108,24 @@ function CreateMeeting({ orgBots, products, onClose, onCreated }: { orgBots: Bot
           ))}
         </div>
       </Field>
+      <Field label="发言方式">
+        <div className="flex gap-1.5">
+          <button
+            onClick={() => setParallel(false)}
+            className={cx('flex-1 rounded-lg border px-3 py-2 text-left text-xs transition', !parallel ? 'border-brand bg-brand-soft text-brand' : 'border-slate-200 text-slate-500')}
+          >
+            <div className="font-medium">顺序讨论</div>
+            <div className="mt-0.5 text-[10px] opacity-80">你一言我一语，后者能看到前者发言（更像真会议）</div>
+          </button>
+          <button
+            onClick={() => setParallel(true)}
+            className={cx('flex-1 rounded-lg border px-3 py-2 text-left text-xs transition', parallel ? 'border-brand bg-brand-soft text-brand' : 'border-slate-200 text-slate-500')}
+          >
+            <div className="font-medium">并行发言</div>
+            <div className="mt-0.5 text-[10px] opacity-80">全员同时发言，各自独立出观点（快 N 倍，互不可见）</div>
+          </button>
+        </div>
+      </Field>
       <div className="mt-4 flex justify-end gap-2">
         <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100">
           取消
@@ -114,7 +133,7 @@ function CreateMeeting({ orgBots, products, onClose, onCreated }: { orgBots: Bot
         <button
           onClick={() => {
             if (!title.trim() || picked.length === 0) return
-            const id = createMeeting({ title: title.trim(), agenda: agenda.trim(), kind, productId, participantBotIds: picked, references: references.trim(), fullDocSlugs: fullDocs })
+            const id = createMeeting({ title: title.trim(), agenda: agenda.trim(), kind, productId, participantBotIds: picked, references: references.trim(), fullDocSlugs: fullDocs, parallel })
             toast('会议已创建')
             onCreated(id)
           }}
@@ -334,9 +353,8 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
     setBusy(true)
     setMeetingStatus(meetingId, 'running')
     try {
-      // 每位虚拟人力依次发言（plan 模式）
-      for (const bot of participants) {
-        setSpeaking(bot.id)
+      // 一位虚拟人力发言：建气泡→流式回填。prior 为该发言可见的已有记录。
+      const speak = async (bot: Bot, prior: ReturnType<typeof cur>['messages']) => {
         const msgId = addMeetingMessage(meetingId, {
           speakerType: 'bot',
           speakerId: bot.id,
@@ -345,7 +363,6 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
           avatarSeed: bot.avatarSeed,
           content: '',
         })
-        const prior = cur().messages.filter((m) => m.id !== msgId)
         const prompt = botTurnPrompt(bot, cur(), prior, product, knowledge)
         try {
           await runExecutorStream(token, { executorId: exec, prompt, planMode: true }, (e) => {
@@ -356,6 +373,19 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
           })
         } catch (err) {
           setMeetingMessage(meetingId, msgId, '⚠️ ' + (err as Error).message)
+        }
+      }
+
+      if (cur().parallel) {
+        // 并行：全员同时发言，各自只看到会前的主持人发言（互不可见）
+        const basePrior = cur().messages
+        setSpeaking('*')
+        await Promise.all(participants.map((bot) => speak(bot, basePrior)))
+      } else {
+        // 顺序：你一言我一语，后者能看到前者的发言
+        for (const bot of participants) {
+          setSpeaking(bot.id)
+          await speak(bot, cur().messages)
         }
       }
       setSpeaking(null)
@@ -444,16 +474,20 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
         {/* 参会者 */}
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <span className="text-[11px] text-slate-400">参会：</span>
-          {participants.map((b) => (
-            <span
-              key={b.id}
-              className={cx('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ring-1', speaking === b.id ? 'bg-indigo-50 text-indigo-700 ring-indigo-300' : 'bg-white text-slate-600 ring-slate-200')}
-            >
-              <Avatar seed={b.avatarSeed} name={b.name} size={16} />
-              {b.name}
-              {speaking === b.id && <Loader2 size={10} className="animate-spin" />}
-            </span>
-          ))}
+          {participants.map((b) => {
+            const active = speaking === b.id || speaking === '*'
+            return (
+              <span
+                key={b.id}
+                className={cx('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ring-1', active ? 'bg-indigo-50 text-indigo-700 ring-indigo-300' : 'bg-white text-slate-600 ring-slate-200')}
+              >
+                <Avatar seed={b.avatarSeed} name={b.name} size={16} />
+                {b.name}
+                {active && <Loader2 size={10} className="animate-spin" />}
+              </span>
+            )
+          })}
+          {meeting.parallel && <span className="text-[10px] text-slate-400">· 并行发言</span>}
           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700 ring-1 ring-emerald-200">你（主持）</span>
         </div>
       </header>
@@ -462,7 +496,7 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
       <div className="max-h-[55vh] min-h-[240px] space-y-3 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50/50 p-4">
         {meeting.messages.length === 0 && (
           <div className="py-10 text-center text-sm text-slate-400">
-            {meeting.status === 'draft' ? '点「开始会议」，各虚拟人力将在 CLI plan 模式下依次发言，产品经理会后整理。' : '会议进行中…'}
+            {meeting.status === 'draft' ? `点「开始会议」，各虚拟人力将在 CLI plan 模式下${meeting.parallel ? '并行' : '依次'}发言，产品经理会后整理。` : '会议进行中…'}
           </div>
         )}
         {meeting.messages.map((m) => (

@@ -214,6 +214,8 @@ export interface Meeting {
   references: string
   /** 全文纳入知识库的文档 slug（其余文档只给摘要/标题） */
   fullDocSlugs: string[]
+  /** 并行发言：所有虚拟人力同时发言（快，但发言互不可见）；否则顺序讨论 */
+  parallel: boolean
   messages: MeetingMessage[]
   /** 产品经理会后整理的输出（执行计划 + 会议纪要，Markdown） */
   output: string
