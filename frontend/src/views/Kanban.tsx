@@ -560,6 +560,84 @@ function TaskDrawer({ taskId, onClose }: { taskId: string; onClose: () => void }
   )
 }
 
+// ── 批量执行：把当前视图内「有负责人且未完成」的任务逐个真实派单，产出回填并置完成 ──
+function BatchRun({ tasks }: { tasks: Task[] }) {
+  const bots = useStore((s) => s.bots)
+  const recordTaskRun = useStore((s) => s.recordTaskRun)
+  const moveTask = useStore((s) => s.moveTask)
+  const token = useAuth((s) => s.token)
+  const [running, setRunning] = useState(false)
+  const [prog, setProg] = useState<{ i: number; total: number; title: string } | null>(null)
+
+  const runnable = tasks.filter((t) => t.botId && t.status !== 'done')
+
+  async function pickExec(): Promise<string | null> {
+    if (!token) return null
+    try {
+      const { machines } = await authApi.machines(token)
+      const online = machines.filter((m) => m.online).flatMap((m) => m.executors)
+      return online.find((e) => e.status === 'idle')?.id || online[0]?.id || null
+    } catch {
+      return null
+    }
+  }
+
+  async function runAll() {
+    if (running || !token) return
+    if (runnable.length === 0) {
+      toast('没有可执行的任务（需已指派负责员工且未完成）', 'warn')
+      return
+    }
+    const exec = await pickExec()
+    if (!exec) {
+      toast('没有在线的本地算力。去「团队与账户 → 本地算力」绑定电脑并保持 agent 运行。', 'warn')
+      return
+    }
+    setRunning(true)
+    let ok = 0
+    let fail = 0
+    for (let i = 0; i < runnable.length; i++) {
+      const t = runnable[i]
+      const bot = bots.find((b) => b.id === t.botId)
+      if (!bot) continue
+      setProg({ i, total: runnable.length, title: t.title })
+      moveTask(t.id, 'in_progress')
+      const prompt = `${assembleSystemPrompt(bot)}\n\n---\n\n# 任务：${t.title}\n\n${t.brief || t.description || '（无简报）'}`
+      let acc = ''
+      try {
+        await runExecutorStream(token, { executorId: exec, prompt }, (e) => {
+          if (e.t === 'chunk') {
+            if (!e.text.startsWith('[agent]')) acc += e.text
+          } else if (e.t === 'done' && e.result) acc = e.result
+          else if (e.t === 'error') acc = (acc + '\n⚠️ ' + e.error).trim()
+        })
+        recordTaskRun(t.id, { output: acc, ok: true })
+        moveTask(t.id, 'done')
+        ok++
+      } catch (err) {
+        recordTaskRun(t.id, { output: '', ok: false })
+        moveTask(t.id, 'backlog')
+        fail++
+      }
+    }
+    setProg(null)
+    setRunning(false)
+    toast(`任务执行完成：成功 ${ok}${fail ? ` · 失败 ${fail}` : ''}`, fail ? 'warn' : 'success')
+  }
+
+  return (
+    <button
+      onClick={runAll}
+      disabled={running || runnable.length === 0}
+      title="逐个把有负责人的未完成任务派给其执行器，产出回填交付物并置为完成"
+      className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-50"
+    >
+      {running ? <Loader2 size={15} className="animate-spin" /> : <Rocket size={15} />}
+      {running && prog ? `执行中 ${prog.i + 1}/${prog.total} · ${prog.title.slice(0, 12)}` : `执行任务${runnable.length ? ` (${runnable.length})` : ''}`}
+    </button>
+  )
+}
+
 export function Kanban() {
   const allProducts = useStore((s) => s.products)
   const currentProjectId = useStore((s) => s.currentProjectId)
@@ -594,18 +672,21 @@ export function Kanban() {
           <h1 className="text-2xl font-bold tracking-tight">任务看板</h1>
           <p className="mt-1 text-sm text-slate-500">拖拽流转状态；点卡片看详情、编简报、管依赖；给任务派机器人即可执行。</p>
         </div>
-        <select
-          value={productFilter}
-          onChange={(e) => setProductFilter(e.target.value)}
-          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
-        >
-          <option value="all">全部产品</option>
-          {products.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            value={productFilter}
+            onChange={(e) => setProductFilter(e.target.value)}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+          >
+            <option value="all">全部产品</option>
+            {products.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <BatchRun tasks={filtered} />
+        </div>
       </header>
 
       <div className="grid flex-1 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">

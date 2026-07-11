@@ -3,7 +3,7 @@ import { Users, Plus, Play, Loader2, Send, Sparkles, Trash2, FileText, ArrowLeft
 import { useStore } from '../store/useStore'
 import { useAuth } from '../store/useAuth'
 import { authApi, runExecutorStream } from '../lib/authApi'
-import { botTurnPrompt, pmConsolidatePrompt, buildProjectKnowledge, parseMeetingPlan, MEETING_KIND } from '../lib/meeting'
+import { botTurnPrompt, pmConsolidatePrompt, buildProjectKnowledge, parseMeetingPlan, docManifestPrompt, parseDocManifest, docAuthorPrompt, MEETING_KIND } from '../lib/meeting'
 import { renderMarkdown } from '../lib/markdown'
 import { Avatar, cx, DOC_TYPE, DOC_TYPE_ORDER } from '../lib/ui'
 import { Modal, Field, inputCls } from '../components/Modal'
@@ -14,6 +14,7 @@ const KIND_CLS: Record<MeetingKind, string> = {
   kickoff: 'bg-indigo-100 text-indigo-700',
   change: 'bg-amber-100 text-amber-700',
   standup: 'bg-slate-100 text-slate-600',
+  docgen: 'bg-emerald-100 text-emerald-700',
 }
 
 // ── 发起会议 ─────────────────────────────────────────────
@@ -327,6 +328,7 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
   const [draft, setDraft] = useState('')
   const [genOpen, setGenOpen] = useState(false)
   const [saveDocOpen, setSaveDocOpen] = useState(false)
+  const [authorOpen, setAuthorOpen] = useState(false)
 
   if (!meeting) return null
   const product = meeting.productId ? products.find((p) => p.id === meeting.productId) ?? null : null
@@ -347,6 +349,7 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
     focusProductId: meeting.productId,
     references: meeting.references ?? '',
     fullDocSlugs: meeting.fullDocSlugs ?? [],
+    includeTaskOutputs: meeting.kind === 'docgen',
   })
 
   const cur = () => useStore.getState().meetings.find((m) => m.id === meetingId)!
@@ -415,9 +418,12 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
       }
       setSpeaking(null)
       setRound(0)
-      // 产品经理会后整理
+      // 产品经理会后整理：文档撰写会 → 产出《文档清单》；其它 → 执行计划+纪要
       setConsolidating(true)
-      const pmPrompt = pmConsolidatePrompt(pm, cur(), cur().messages, product, knowledge)
+      const pmPrompt =
+        cur().kind === 'docgen'
+          ? docManifestPrompt(pm, cur(), cur().messages, product, knowledge)
+          : pmConsolidatePrompt(pm, cur(), cur().messages, product, knowledge)
       let out = ''
       await runExecutorStream(token, { executorId: exec, prompt: pmPrompt, planMode: true }, (e) => {
         if (e.t === 'chunk') {
@@ -432,7 +438,7 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
         }
       })
       setMeetingStatus(meetingId, 'done')
-      toast('会议结束，产品经理已整理出执行计划与纪要', 'success')
+      toast(cur().kind === 'docgen' ? '会议结束，产品经理已拟好《文档清单》，可开始撰写' : '会议结束，产品经理已整理出执行计划与纪要', 'success')
     } finally {
       setBusy(false)
       setSpeaking(null)
@@ -588,22 +594,33 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
       {(meeting.output || consolidating) && (
         <div className="mt-4 rounded-2xl border border-brand/30 bg-brand-soft/40 p-5">
           <div className="mb-2 flex items-center gap-1.5 text-sm font-bold text-brand">
-            <ClipboardList size={15} /> 会议输出 · 由产品经理 {pm?.name} 整理
+            <ClipboardList size={15} /> {meeting.kind === 'docgen' ? '文档清单' : '会议输出'} · 由产品经理 {pm?.name} 整理
             {consolidating && <Loader2 size={13} className="animate-spin" />}
             {meeting.output && !consolidating && (
               <div className="ml-auto flex gap-1.5">
-                <button
-                  onClick={() => setSaveDocOpen(true)}
-                  className="flex items-center gap-1 rounded-lg border border-brand/40 px-2.5 py-1 text-xs font-medium text-brand hover:bg-brand-soft"
-                >
-                  <FileText size={13} /> 存为文档
-                </button>
-                <button
-                  onClick={() => setGenOpen(true)}
-                  className="flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700"
-                >
-                  <ListPlus size={13} /> 据此生成任务
-                </button>
+                {meeting.kind === 'docgen' ? (
+                  <button
+                    onClick={() => setAuthorOpen(true)}
+                    className="flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+                  >
+                    <FileText size={13} /> 据清单撰写文档
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setSaveDocOpen(true)}
+                      className="flex items-center gap-1 rounded-lg border border-brand/40 px-2.5 py-1 text-xs font-medium text-brand hover:bg-brand-soft"
+                    >
+                      <FileText size={13} /> 存为文档
+                    </button>
+                    <button
+                      onClick={() => setGenOpen(true)}
+                      className="flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+                    >
+                      <ListPlus size={13} /> 据此生成任务
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -622,7 +639,183 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
       {saveDocOpen && (
         <SaveDocModal meeting={meeting} products={projectProducts} defaultProductId={meeting.productId ?? projectProducts[0]?.id ?? null} ownerBotId={pm?.id ?? null} onClose={() => setSaveDocOpen(false)} />
       )}
+      {authorOpen && (
+        <AuthorDocsModal
+          meeting={meeting}
+          products={projectProducts}
+          orgBots={bots.filter((b) => b.orgId === meeting.orgId)}
+          knowledge={knowledge}
+          defaultProductId={meeting.productId ?? projectProducts[0]?.id ?? null}
+          onClose={() => setAuthorOpen(false)}
+        />
+      )}
     </div>
+  )
+}
+
+// ── 文档撰写会：据《文档清单》逐篇让负责角色撰写完整文档，存入文档中心 ──
+function AuthorDocsModal({
+  meeting,
+  products,
+  orgBots,
+  knowledge,
+  defaultProductId,
+  onClose,
+}: {
+  meeting: Meeting
+  products: Product[]
+  orgBots: Bot[]
+  knowledge: string
+  defaultProductId: string | null
+  onClose: () => void
+}) {
+  const addDoc = useStore((s) => s.addDoc)
+  const openDoc = useStore((s) => s.openDoc)
+  const token = useAuth((s) => s.token)
+  const items = useMemo(() => parseDocManifest(meeting.output), [meeting.output])
+  const [checked, setChecked] = useState<boolean[]>(() => items.map(() => true))
+  const [productId, setProductId] = useState<string | null>(defaultProductId)
+  const [running, setRunning] = useState(false)
+  const [prog, setProg] = useState<{ i: number; total: number; title: string } | null>(null)
+  const [created, setCreated] = useState<{ slug: string; title: string }[]>([])
+
+  const product = products.find((p) => p.id === productId)
+  const n = checked.filter(Boolean).length
+  const resolveBot = (role: string): Bot | undefined =>
+    orgBots.find((b) => b.role === role) || orgBots.find((b) => b.role === '产品经理') || orgBots[0]
+
+  async function pickExec(): Promise<string | null> {
+    if (!token) return null
+    try {
+      const { machines } = await authApi.machines(token)
+      const online = machines.filter((m) => m.online).flatMap((m) => m.executors)
+      return online.find((e) => e.status === 'idle')?.id || online[0]?.id || null
+    } catch {
+      return null
+    }
+  }
+
+  async function authorAll() {
+    if (running || !token) return
+    if (!productId || !product) {
+      toast('请先选择归属产品', 'warn')
+      return
+    }
+    const chosen = items.filter((_, i) => checked[i])
+    if (chosen.length === 0) return
+    const exec = await pickExec()
+    if (!exec) {
+      toast('没有在线的本地算力。去「团队与账户 → 本地算力」绑定电脑并保持 agent 运行。', 'warn')
+      return
+    }
+    setRunning(true)
+    const done: { slug: string; title: string }[] = []
+    for (let i = 0; i < chosen.length; i++) {
+      const item = chosen[i]
+      const bot = resolveBot(item.ownerRole)
+      setProg({ i, total: chosen.length, title: item.title })
+      const prompt = docAuthorPrompt(bot ?? orgBots[0], meeting, product, knowledge, item)
+      let acc = ''
+      try {
+        await runExecutorStream(token, { executorId: exec, prompt, planMode: true }, (e) => {
+          if (e.t === 'chunk') {
+            if (!e.text.startsWith('[agent]')) acc += e.text
+          } else if (e.t === 'done' && e.result) acc = e.result
+          else if (e.t === 'error') acc = (acc + '\n⚠️ ' + e.error).trim()
+        })
+      } catch (err) {
+        acc = '⚠️ ' + (err as Error).message
+      }
+      const content = acc.trim() || `# ${item.title}\n\n（未产出内容）`
+      const slug = `doc-${Math.random().toString(36).slice(2, 10)}`
+      addDoc({
+        slug,
+        title: item.title,
+        type: item.type,
+        productId,
+        productVersion: product.currentVersion,
+        requirementId: null,
+        ownerBotId: bot?.id ?? null,
+        content,
+      })
+      done.push({ slug, title: item.title })
+      setCreated([...done])
+    }
+    setProg(null)
+    setRunning(false)
+    toast(`已撰写 ${done.length} 篇文档并存入文档中心`, 'success')
+  }
+
+  return (
+    <Modal open onClose={onClose} title="据《文档清单》撰写项目文档">
+      {items.length === 0 ? (
+        <p className="py-4 text-sm text-slate-400">未能从会议输出里解析出文档清单。请确认这是「文档撰写」会议，且产品经理已按格式产出清单。</p>
+      ) : (
+        <>
+          <Field label="归属产品">
+            <select className={inputCls} value={productId ?? ''} onChange={(e) => setProductId(e.target.value || null)} disabled={running}>
+              <option value="">选择产品…</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}（{p.currentVersion}）
+                </option>
+              ))}
+            </select>
+          </Field>
+          <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">要撰写的文档 · {n}/{items.length}</div>
+          <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
+            {items.map((it, i) => {
+              const bot = resolveBot(it.ownerRole)
+              const madeIdx = created.findIndex((c) => c.title === it.title)
+              return (
+                <label key={i} className="flex cursor-pointer items-start gap-2 rounded px-1.5 py-1 text-sm hover:bg-slate-50">
+                  <input
+                    type="checkbox"
+                    checked={checked[i]}
+                    disabled={running}
+                    onChange={() => setChecked((c) => c.map((v, j) => (j === i ? !v : v)))}
+                    className="mt-1 accent-brand"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="font-medium">{it.title}</span>
+                    <span className="ml-1.5 rounded bg-slate-100 px-1 text-[10px] text-slate-500">{DOC_TYPE[it.type]?.label ?? it.type}</span>
+                    <span className="ml-1 text-[11px] text-slate-400">· {bot?.name ?? '?'}（{it.ownerRole}）</span>
+                    {madeIdx >= 0 && (
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault()
+                          onClose()
+                          if (productId) openDoc(productId, created[madeIdx].slug)
+                        }}
+                        className="ml-1.5 text-[11px] font-medium text-emerald-600 hover:underline"
+                      >
+                        ✓ 已写成，查看
+                      </button>
+                    )}
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+          <p className="mt-2 text-[11px] text-slate-400">每篇由对应负责角色的机器人真实撰写（占用本地算力，按篇串行）。写好即存入文档中心，走版本流。</p>
+        </>
+      )}
+      <div className="mt-4 flex justify-end gap-2">
+        <button onClick={onClose} disabled={running} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-50">
+          {created.length ? '完成' : '取消'}
+        </button>
+        {items.length > 0 && (
+          <button
+            onClick={authorAll}
+            disabled={running || n === 0 || !productId}
+            className="flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {running ? <Loader2 size={15} className="animate-spin" /> : <FileText size={15} />}
+            {running && prog ? `撰写中 ${prog.i + 1}/${prog.total}…` : `撰写 ${n} 篇`}
+          </button>
+        )}
+      </div>
+    </Modal>
   )
 }
 

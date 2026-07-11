@@ -1,11 +1,12 @@
-import type { Bot, Meeting, MeetingKind, MeetingMessage, Product, Requirement, Task, WikiDoc } from '../types'
+import type { Bot, DocType, Meeting, MeetingKind, MeetingMessage, Product, Requirement, Task, WikiDoc } from '../types'
 import { assembleSystemPrompt } from './botCharter'
-import { DOC_TYPE } from './ui'
+import { DOC_TYPE, DOC_TYPE_ORDER } from './ui'
 
 export const MEETING_KIND: Record<MeetingKind, { label: string; hint: string }> = {
   kickoff: { label: '项目立项', hint: '对新项目/新产品立项，明确目标、范围、分工与计划' },
   change: { label: '需求变更', hint: '对已有项目的需求变更做评估、影响分析与重排计划' },
   standup: { label: '例会同步', hint: '同步进展、对齐优先级、暴露阻塞与风险' },
+  docgen: { label: '文档撰写', hint: '基于已完成任务的产出，商定要写哪些项目文档、各自负责，随后逐篇撰写正式文档' },
 }
 
 const REQ_STATUS: Record<string, string> = { draft: '草稿', planning: '规划中', active: '进行中', done: '已完成' }
@@ -24,9 +25,11 @@ export function buildProjectKnowledge(input: {
   focusProductId: string | null
   references?: string
   fullDocSlugs?: string[]
+  /** 纳入已完成任务的产出（文档撰写会用它作为素材） */
+  includeTaskOutputs?: boolean
   maxChars?: number
 }): string {
-  const { projectName, projectDesc, products, requirements, docs, tasks, focusProductId, references = '', fullDocSlugs = [], maxChars = 30000 } = input
+  const { projectName, projectDesc, products, requirements, docs, tasks, focusProductId, references = '', fullDocSlugs = [], includeTaskOutputs = false, maxChars = 30000 } = input
 
   const parts: string[] = [`## 背景知识库 · 项目「${projectName}」`]
   if (projectDesc) parts.push(projectDesc)
@@ -34,6 +37,19 @@ export function buildProjectKnowledge(input: {
 
   // 主持人补充的背景资料（用户手工录入，不截断）
   if (references.trim()) parts.push(`\n## 主持人补充的背景资料\n${references.trim()}`)
+
+  // 已完成任务的产出（文档撰写会的素材来源）
+  if (includeTaskOutputs) {
+    const doneWithOutput = tasks.filter((t) => t.output && t.output.trim())
+    if (doneWithOutput.length) {
+      parts.push(`\n## 已完成任务的产出（${doneWithOutput.length} 项，撰写文档的一手素材）`)
+      const budget = Math.floor((maxChars * 0.6) / doneWithOutput.length)
+      for (const t of doneWithOutput) {
+        const body = (t.output ?? '').trim()
+        parts.push(`\n### 任务：${t.title}\n${body.slice(0, Math.max(600, budget))}${body.length > Math.max(600, budget) ? '\n…（产出过长已截断）' : ''}`)
+      }
+    }
+  }
 
   // 全文纳入的文档（每篇最多 8000 字）
   const fullSet = new Set(fullDocSlugs)
@@ -190,6 +206,90 @@ export function botTurnPrompt(
     `要具体、扣住产品实际情况，不要泛泛而谈。以「计划模式」思考——只讨论与规划，不执行任何改动。控制在 250–450 字，直接给内容、不要寒暄。`,
   )
   return base.join('\n')
+}
+
+// ── 文档撰写会 ─────────────────────────────────────────────
+/** 标签→DocType 反查（用于解析清单里的「类型」） */
+const DOC_LABEL_TO_TYPE: Record<string, DocType> = Object.fromEntries(
+  (Object.entries(DOC_TYPE) as [DocType, { label: string }][]).map(([k, v]) => [v.label, k]),
+) as Record<string, DocType>
+
+export interface DocManifestItem {
+  title: string
+  type: DocType
+  ownerRole: string
+  brief: string
+}
+
+/** 产品经理据讨论产出《文档撰写清单》——每篇：标题｜类型｜负责角色｜要点 */
+export function docManifestPrompt(pm: Bot, meeting: Meeting, allMessages: MeetingMessage[], product: Product | null, knowledge: string): string {
+  const types = DOC_TYPE_ORDER.map((t) => DOC_TYPE[t].label).join('、')
+  return [
+    assembleSystemPrompt(pm),
+    '',
+    '---',
+    '',
+    '# 会后整理任务：拟定《文档撰写清单》',
+    '你是本次「文档撰写会」的产品经理。基于上面的背景（尤其「已完成任务的产出」）与下方讨论，列出本项目现在应当撰写的**全部正式项目文档**，并分派到负责角色。',
+    '',
+    context(meeting, product),
+    '',
+    knowledge,
+    '',
+    '## 完整讨论记录',
+    transcript(allMessages),
+    '',
+    '## 你的输出（严格格式，供系统解析）',
+    '先写一行「## 文档清单」，随后**每篇文档一行**，严格用以下格式（用全角竖线 ｜ 分隔四段，不要加表格）：',
+    '`- 文档标题 ｜ 类型 ｜ 负责角色 ｜ 一句话要点（这篇要覆盖什么）`',
+    `其中「类型」只能从这些里选一个：${types}。`,
+    '「负责角色」从参会角色里选最合适的一个。覆盖项目需要的各类文档（愿景/需求/架构/接口/数据/设计/测试/发布等按需），不要遗漏，也不要为凑数硬造。',
+    '清单之后可另起「## 说明」简述取舍，但清单行必须严格如上格式。',
+  ].join('\n')
+}
+
+/** 解析《文档撰写清单》为结构化条目 */
+export function parseDocManifest(output: string): DocManifestItem[] {
+  if (!output) return []
+  const items: DocManifestItem[] = []
+  for (const raw of output.split('\n')) {
+    const line = raw.trim()
+    const m = line.match(/^([-*]|\d+[.、])\s+(.+)$/)
+    if (!m) continue
+    const cols = m[2].split(/[｜|]/).map((c) => c.replace(/\*\*/g, '').replace(/`/g, '').trim())
+    if (cols.length < 3 || !cols[0]) continue
+    const [title, typeLabel, ownerRole, ...rest] = cols
+    items.push({
+      title: title.slice(0, 80),
+      type: DOC_LABEL_TO_TYPE[typeLabel] ?? 'prd',
+      ownerRole: ownerRole || '产品经理',
+      brief: (rest.join(' ') || '').slice(0, 200),
+    })
+  }
+  return items.slice(0, 20)
+}
+
+/** 某角色撰写一篇完整文档的 prompt */
+export function docAuthorPrompt(bot: Bot, meeting: Meeting, product: Product | null, knowledge: string, item: DocManifestItem): string {
+  const typeLabel = DOC_TYPE[item.type]?.label ?? item.type
+  return [
+    assembleSystemPrompt(bot),
+    '',
+    '---',
+    '',
+    context(meeting, product),
+    '',
+    knowledge,
+    '',
+    `## 撰写任务：${item.title}（${typeLabel}）`,
+    `你负责撰写这篇「${typeLabel}」文档。要点：${item.brief || '（见标题）'}`,
+    '要求：',
+    '- **直接输出完整文档正文**（Markdown），不要寒暄、不要复述任务、不要写"以下是…"。',
+    '- 紧扣上面的背景知识库与「已完成任务的产出」，用项目真实信息，不要泛泛而谈、不要占位符。',
+    `- 结构专业、可交付：符合「${typeLabel}」这类文档应有的章节与深度。`,
+    '- 以「计划/文档」形态产出，只写文档内容本身，不执行任何代码或改动。',
+    '- 首行用 `# 标题` 开头。',
+  ].join('\n')
 }
 
 /** 产品经理会后整理 prompt：输出执行计划 + 会议纪要 */
