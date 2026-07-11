@@ -151,6 +151,7 @@ interface State {
     references?: string
     fullDocSlugs?: string[]
     parallel?: boolean
+    rounds?: number
   }) => string
   setMeetingReferences: (meetingId: string, references: string) => void
   addMeetingMessage: (meetingId: string, msg: Omit<MeetingMessage, 'id' | 'createdAt'>) => string
@@ -516,7 +517,7 @@ export const useStore = create<State>()(
     })),
 
   // ── 会议 ──────────────────────────────────────────────
-  createMeeting: ({ title, agenda, kind, productId, participantBotIds, references, fullDocSlugs, parallel }) => {
+  createMeeting: ({ title, agenda, kind, productId, participantBotIds, references, fullDocSlugs, parallel, rounds }) => {
     const id = nextId('meeting')
     set((s) => {
       const prod = productId ? s.products.find((p) => p.id === productId) : null
@@ -533,6 +534,7 @@ export const useStore = create<State>()(
         references: references ?? '',
         fullDocSlugs: fullDocSlugs ?? [],
         parallel: parallel ?? false,
+        rounds: Math.min(3, Math.max(1, rounds ?? 1)),
         messages: [],
         output: '',
         createdAt: Date.now(),

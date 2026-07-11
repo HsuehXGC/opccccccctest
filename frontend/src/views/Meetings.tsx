@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { Users, Plus, Play, Loader2, Send, Sparkles, Trash2, FileText, ArrowLeft, Bot as BotIcon, ClipboardList, ListPlus } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useAuth } from '../store/useAuth'
@@ -28,6 +28,7 @@ function CreateMeeting({ orgBots, products, onClose, onCreated }: { orgBots: Bot
   const [references, setReferences] = useState('')
   const [fullDocs, setFullDocs] = useState<string[]>([])
   const [parallel, setParallel] = useState(false)
+  const [rounds, setRounds] = useState(1)
 
   const productIds = new Set(products.map((p) => p.id))
   const projectDocs = allDocs.filter((d) => productIds.has(d.productId))
@@ -126,6 +127,23 @@ function CreateMeeting({ orgBots, products, onClose, onCreated }: { orgBots: Bot
           </button>
         </div>
       </Field>
+      <Field label="讨论轮数">
+        <div className="flex gap-1.5">
+          {[1, 2, 3].map((n) => (
+            <button
+              key={n}
+              onClick={() => setRounds(n)}
+              className={cx('flex-1 rounded-lg border py-2 text-sm font-medium transition', rounds === n ? 'border-brand bg-brand-soft text-brand' : 'border-slate-200 text-slate-500')}
+            >
+              {n} 轮
+            </button>
+          ))}
+        </div>
+        <p className="mt-1 text-[11px] text-slate-400">
+          {rounds === 1 ? '各自表态一次即整理。' : `第 1 轮各自发言，之后 ${rounds - 1} 轮能看到他人发言、相互反应/收敛/抛分歧。`}
+          {parallel && rounds >= 2 && <span className="text-brand"> 并行+多轮：兼顾速度与交锋，推荐。</span>}
+        </p>
+      </Field>
       <div className="mt-4 flex justify-end gap-2">
         <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100">
           取消
@@ -133,7 +151,7 @@ function CreateMeeting({ orgBots, products, onClose, onCreated }: { orgBots: Bot
         <button
           onClick={() => {
             if (!title.trim() || picked.length === 0) return
-            const id = createMeeting({ title: title.trim(), agenda: agenda.trim(), kind, productId, participantBotIds: picked, references: references.trim(), fullDocSlugs: fullDocs, parallel })
+            const id = createMeeting({ title: title.trim(), agenda: agenda.trim(), kind, productId, participantBotIds: picked, references: references.trim(), fullDocSlugs: fullDocs, parallel, rounds })
             toast('会议已创建')
             onCreated(id)
           }}
@@ -304,6 +322,7 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
 
   const [busy, setBusy] = useState(false)
   const [speaking, setSpeaking] = useState<string | null>(null)
+  const [round, setRound] = useState(0)
   const [consolidating, setConsolidating] = useState(false)
   const [draft, setDraft] = useState('')
   const [genOpen, setGenOpen] = useState(false)
@@ -353,8 +372,8 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
     setBusy(true)
     setMeetingStatus(meetingId, 'running')
     try {
-      // 一位虚拟人力发言：建气泡→流式回填。prior 为该发言可见的已有记录。
-      const speak = async (bot: Bot, prior: ReturnType<typeof cur>['messages']) => {
+      // 一位虚拟人力在第 round 轮发言：建气泡→流式回填。prior 为该发言可见的已有记录。
+      const speak = async (bot: Bot, prior: ReturnType<typeof cur>['messages'], round: number) => {
         const msgId = addMeetingMessage(meetingId, {
           speakerType: 'bot',
           speakerId: bot.id,
@@ -362,8 +381,9 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
           speakerRole: bot.role,
           avatarSeed: bot.avatarSeed,
           content: '',
+          round,
         })
-        const prompt = botTurnPrompt(bot, cur(), prior, product, knowledge)
+        const prompt = botTurnPrompt(bot, cur(), prior, product, knowledge, round)
         try {
           await runExecutorStream(token, { executorId: exec, prompt, planMode: true }, (e) => {
             if (e.t === 'chunk') {
@@ -376,19 +396,25 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
         }
       }
 
-      if (cur().parallel) {
-        // 并行：全员同时发言，各自只看到会前的主持人发言（互不可见）
-        const basePrior = cur().messages
-        setSpeaking('*')
-        await Promise.all(participants.map((bot) => speak(bot, basePrior)))
-      } else {
-        // 顺序：你一言我一语，后者能看到前者的发言
-        for (const bot of participants) {
-          setSpeaking(bot.id)
-          await speak(bot, cur().messages)
+      // 多轮讨论：第 1 轮各自表态；≥2 轮时后续轮次能看到他人上一轮的发言、相互反应/收敛
+      const rounds = Math.max(1, cur().rounds ?? 1)
+      for (let r = 1; r <= rounds; r++) {
+        setRound(r)
+        if (cur().parallel) {
+          // 并行：本轮所有 bot 只看到「本轮开始前」的快照（轮内互不可见，跨轮可见）
+          const basePrior = cur().messages
+          setSpeaking('*')
+          await Promise.all(participants.map((bot) => speak(bot, basePrior, r)))
+        } else {
+          // 顺序：你一言我一语，后者能看到前者（含本轮更早发言者）的发言
+          for (const bot of participants) {
+            setSpeaking(bot.id)
+            await speak(bot, cur().messages, r)
+          }
         }
       }
       setSpeaking(null)
+      setRound(0)
       // 产品经理会后整理
       setConsolidating(true)
       const pmPrompt = pmConsolidatePrompt(pm, cur(), cur().messages, product, knowledge)
@@ -448,6 +474,7 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
               {product && <span className="text-brand"> · 聚焦「{product.name}」</span>}
               {(meeting.fullDocSlugs?.length ?? 0) > 0 && <span className="text-emerald-600"> · {meeting.fullDocSlugs.length} 篇全文</span>}
               {meeting.references?.trim() && <span className="text-emerald-600"> · 含补充资料</span>}
+              <span className="text-slate-500"> · {meeting.parallel ? '并行' : '顺序'} · {meeting.rounds ?? 1} 轮</span>
             </p>
             {meeting.status === 'draft' && (
               <details className="mt-2">
@@ -488,6 +515,9 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
             )
           })}
           {meeting.parallel && <span className="text-[10px] text-slate-400">· 并行发言</span>}
+          {busy && round > 0 && (meeting.rounds ?? 1) > 1 && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand-soft px-2 py-0.5 text-[10px] font-medium text-brand">第 {round}/{meeting.rounds} 轮</span>
+          )}
           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700 ring-1 ring-emerald-200">你（主持）</span>
         </div>
       </header>
@@ -496,11 +526,22 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
       <div className="max-h-[55vh] min-h-[240px] space-y-3 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50/50 p-4">
         {meeting.messages.length === 0 && (
           <div className="py-10 text-center text-sm text-slate-400">
-            {meeting.status === 'draft' ? `点「开始会议」，各虚拟人力将在 CLI plan 模式下${meeting.parallel ? '并行' : '依次'}发言，产品经理会后整理。` : '会议进行中…'}
+            {meeting.status === 'draft' ? `点「开始会议」，各虚拟人力将在 CLI plan 模式下${meeting.parallel ? '并行' : '依次'}发言${(meeting.rounds ?? 1) > 1 ? ` · 共 ${meeting.rounds} 轮` : ''}，产品经理会后整理。` : '会议进行中…'}
           </div>
         )}
-        {meeting.messages.map((m) => (
-          <div key={m.id} className={cx('flex gap-2.5', m.speakerType === 'user' && 'flex-row-reverse')}>
+        {meeting.messages.map((m, i) => {
+          const prev = meeting.messages[i - 1]
+          const showRoundDivider = (meeting.rounds ?? 1) > 1 && !!m.round && m.speakerType === 'bot' && (!prev || prev.round !== m.round)
+          return (
+          <Fragment key={m.id}>
+          {showRoundDivider && (
+            <div className="flex items-center gap-2 py-1 text-[11px] font-medium text-slate-400">
+              <span className="h-px flex-1 bg-slate-200" />
+              第 {m.round} 轮讨论{m.round! >= 2 ? '（相互反应 / 收敛 / 抛分歧）' : ''}
+              <span className="h-px flex-1 bg-slate-200" />
+            </div>
+          )}
+          <div className={cx('flex gap-2.5', m.speakerType === 'user' && 'flex-row-reverse')}>
             {m.speakerType === 'user' ? (
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-xs font-semibold text-white">你</div>
             ) : (
@@ -517,7 +558,9 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
               </div>
             </div>
           </div>
-        ))}
+          </Fragment>
+          )
+        })}
         {consolidating && (
           <div className="flex items-center justify-center gap-2 py-3 text-xs text-slate-400">
             <Loader2 size={13} className="animate-spin" /> 产品经理 {pm?.name} 正在整理会议输出…

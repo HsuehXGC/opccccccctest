@@ -147,15 +147,27 @@ function context(meeting: Meeting, product: Product | null): string {
     .join('\n')
 }
 
-/** 某个虚拟人力在会议上的发言 prompt（plan 模式） */
+/** 第 2 轮及以后的追加指令：看到他人发言后反应/收敛/抛分歧 */
+const roundDirective = (round: number) =>
+  [
+    '',
+    `## 第 ${round} 轮讨论`,
+    '你在上一轮已经发过言，现在能看到其他角色这一轮之前的发言（见上「已有发言」）。请：',
+    '① 明确指出你**同意**谁的哪一点、**不同意**谁的哪一点（点名到角色）；',
+    '② 据此**更新或收敛**你的立场，或抛出需要拍板的分歧；',
+    '③ 只说增量，**不要重复上一轮**。控制在 150–320 字，直接给内容。',
+  ].join('\n')
+
+/** 某个虚拟人力在会议上的发言 prompt（plan 模式）。round≥2 时追加多轮反应指令 */
 export function botTurnPrompt(
   bot: Bot,
   meeting: Meeting,
   priorMessages: MeetingMessage[],
   product: Product | null,
   knowledge: string,
+  round = 1,
 ): string {
-  return [
+  const base = [
     assembleSystemPrompt(bot),
     '',
     '---',
@@ -166,11 +178,18 @@ export function botTurnPrompt(
     '',
     '## 已有发言',
     transcript(priorMessages),
+  ]
+  if (round >= 2) {
+    base.push(roundDirective(round))
+    return base.join('\n')
+  }
+  base.push(
     '',
     '## 你的发言',
     `你正在参加这个会议。请**结合上面的背景知识库**（产品现状、需求、文档、任务），以${bot.role}的视角针对议题发表专业意见：关注点、风险、建议，以及你负责部分的初步计划。`,
     `要具体、扣住产品实际情况，不要泛泛而谈。以「计划模式」思考——只讨论与规划，不执行任何改动。控制在 250–450 字，直接给内容、不要寒暄。`,
-  ].join('\n')
+  )
+  return base.join('\n')
 }
 
 /** 产品经理会后整理 prompt：输出执行计划 + 会议纪要 */

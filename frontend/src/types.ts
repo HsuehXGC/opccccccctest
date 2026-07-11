@@ -195,6 +195,8 @@ export interface MeetingMessage {
   speakerRole?: string
   avatarSeed?: string
   content: string
+  /** 该发言所属讨论轮次（1 起）；多轮会议用于分组显示与「已有发言」筛选 */
+  round?: number
   createdAt: number
 }
 
@@ -216,6 +218,8 @@ export interface Meeting {
   fullDocSlugs: string[]
   /** 并行发言：所有虚拟人力同时发言（快，但发言互不可见）；否则顺序讨论 */
   parallel: boolean
+  /** 讨论轮数：1=各自表态；≥2 时后续轮次能看到他人发言、相互反应/收敛/抛分歧 */
+  rounds: number
   messages: MeetingMessage[]
   /** 产品经理会后整理的输出（执行计划 + 会议纪要，Markdown） */
   output: string
