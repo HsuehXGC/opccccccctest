@@ -141,11 +141,54 @@ app.post('/api/agent/run', requireAuth, async (req: AuthedRequest, res) => {
   const owner = gateway.listMachines().find((m) => m.accountId === orgId && m.executors.some((e) => e.id === executorId))
   if (!owner) return res.status(404).json({ error: '执行器不在线或不属于你的账户组' })
   try {
-    const out = await gateway.runJob(executorId, prompt, cwd)
+    // 真实 claude 任务常需数分钟，放宽到 10 分钟
+    const out = await gateway.runJob(executorId, prompt, cwd, 600_000)
     res.json({ ok: true, ...out })
   } catch (err) {
     res.status(502).json({ error: (err as Error).message })
   }
+})
+
+/** 流式派单：派单后把执行器回传的会话内容(chunk/done/error)以 SSE 实时推给前端 */
+app.post('/api/agent/run-stream', requireAuth, (req: AuthedRequest, res) => {
+  const { executorId, prompt, cwd } = req.body ?? {}
+  if (!executorId || !prompt) return res.status(400).json({ error: 'executorId 和 prompt 必填' })
+  const orgId = req.auth!.user.orgId
+  const owner = gateway.listMachines().find((m) => m.accountId === orgId && m.executors.some((e) => e.id === executorId))
+  if (!owner) return res.status(404).json({ error: '执行器不在线或不属于你的账户组' })
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  })
+  const write = (obj: unknown) => res.write(`data: ${JSON.stringify(obj)}\n\n`)
+
+  let jobId = ''
+  const onJob = (e: { type: string; jobId: string; text?: string; result?: string; error?: string }) => {
+    if (e.jobId !== jobId) return
+    if (e.type === 'chunk') write({ t: 'chunk', text: e.text })
+    else if (e.type === 'done') {
+      write({ t: 'done', result: e.result })
+      finish()
+    } else if (e.type === 'error') {
+      write({ t: 'error', error: e.error })
+      finish()
+    }
+  }
+  const finish = () => {
+    gateway.off('job', onJob)
+    res.end()
+  }
+  try {
+    jobId = gateway.dispatch(executorId, prompt, cwd).jobId
+  } catch (err) {
+    write({ t: 'error', error: (err as Error).message })
+    return res.end()
+  }
+  gateway.on('job', onJob)
+  req.on('close', () => gateway.off('job', onJob))
 })
 
 const PORT = Number(process.env.PORT) || 8787

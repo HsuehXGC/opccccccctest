@@ -144,13 +144,34 @@ ws.addEventListener('error', (e) => {
   console.error('✗ 连接错误:', e?.message || e)
 })
 
+// 把 claude stream-json 的一行事件渲染成可读文本（用于流式回传）
+function renderClaudeEvent(ev) {
+  // 逐 token 增量（--include-partial-messages）
+  if (ev.type === 'stream_event') {
+    const e = ev.event || {}
+    if (e.type === 'content_block_delta') {
+      if (e.delta?.type === 'text_delta') return e.delta.text
+      if (e.delta?.type === 'thinking_delta') return e.delta.thinking || ''
+    }
+    if (e.type === 'content_block_start' && e.content_block?.type === 'tool_use') {
+      return `\n〔🔧 ${e.content_block.name}〕\n`
+    }
+    return ''
+  }
+  return ''
+}
+
 // ── 执行一段派单 = 在对应 CLI 上跑 prompt，流式回传 ──────────
 function runJob({ jobId, kind, prompt, cwd }) {
   const execId = `${machineId}-${kind}`
   busy.add(execId)
   const bin = binOf[kind] || findBin(kind) || kind
-  const args = kind === 'codex' ? ['exec', prompt] : ['-p', prompt]
-  console.log(`▶ job ${jobId}: ${bin} ${kind === 'codex' ? 'exec' : '-p'} "${String(prompt).slice(0, 60)}…"`)
+  const isClaude = kind !== 'codex'
+  // claude 用 stream-json + 部分消息，拿到逐 token 会话内容
+  const args = isClaude
+    ? ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--include-partial-messages']
+    : ['exec', prompt]
+  console.log(`▶ job ${jobId}: ${bin} ${isClaude ? '-p (stream-json)' : 'exec'} "${String(prompt).slice(0, 50)}…"`)
 
   let child
   try {
@@ -163,11 +184,42 @@ function runJob({ jobId, kind, prompt, cwd }) {
   }
   running.set(jobId, child)
 
-  let out = ''
-  child.stdout.on('data', (d) => {
-    const text = d.toString()
-    out += text
+  let result = '' // 最终结果（stream-json 的 result 事件；否则累积文本）
+  let streamed = '' // 已流式发出的可读文本
+  let buf = ''
+
+  function pushChunk(text) {
+    if (!text) return
+    streamed += text
     send({ t: 'job:chunk', jobId, stream: 'stdout', text })
+  }
+
+  child.stdout.on('data', (d) => {
+    buf += d.toString()
+    if (!isClaude) {
+      pushChunk(buf)
+      buf = ''
+      return
+    }
+    // 按行解析 JSONL
+    let nl
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim()
+      buf = buf.slice(nl + 1)
+      if (!line) continue
+      let ev
+      try {
+        ev = JSON.parse(line)
+      } catch {
+        pushChunk(line + '\n') // 非 JSON（如登录提示/报错）原样透出
+        continue
+      }
+      if (ev.type === 'result') {
+        result = typeof ev.result === 'string' ? ev.result : result
+      } else {
+        pushChunk(renderClaudeEvent(ev))
+      }
+    }
   })
   child.stderr.on('data', (d) => {
     send({ t: 'job:chunk', jobId, stream: 'stderr', text: d.toString() })
@@ -181,8 +233,9 @@ function runJob({ jobId, kind, prompt, cwd }) {
     busy.delete(execId)
     running.delete(jobId)
     console.log(`■ job ${jobId} 结束 exit=${code}`)
-    if (code === 0) send({ t: 'job:done', jobId, exitCode: 0, result: out.trim() })
-    else send({ t: 'job:error', jobId, error: `退出码 ${code}${out ? `\n${out.slice(-500)}` : ''}` })
+    const final = (result || streamed).trim()
+    if (code === 0) send({ t: 'job:done', jobId, exitCode: 0, result: final })
+    else send({ t: 'job:error', jobId, error: final || `退出码 ${code}` })
   })
 }
 

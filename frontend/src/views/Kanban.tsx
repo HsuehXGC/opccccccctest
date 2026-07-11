@@ -1,8 +1,146 @@
 import { useEffect, useMemo, useState } from 'react'
-import { UserPlus, Terminal, FileText, Wrench, Lock, X, GitBranch, Plus, ExternalLink, ClipboardList } from 'lucide-react'
+import { UserPlus, Terminal, FileText, Wrench, Lock, X, GitBranch, Plus, ExternalLink, ClipboardList, Rocket, Loader2, Cpu } from 'lucide-react'
 import { useStore } from '../store/useStore'
+import { useAuth } from '../store/useAuth'
+import { authApi, runExecutorStream, type LiveMachine } from '../lib/authApi'
+import { assembleSystemPrompt } from '../lib/botCharter'
+import { toast } from '../lib/toast'
 import { Avatar, DOC_TYPE, PriorityBadge, TASK_COLUMNS, cx } from '../lib/ui'
 import type { Task, TaskKind, TaskStatus } from '../types'
+
+// ── 派单执行：任务 → 负责机器人(system prompt) + brief → 真实执行器 ──────────
+function TaskDispatch({ task }: { task: Task }) {
+  const bot = useStore((s) => s.bots.find((b) => b.id === task.botId))
+  const recordTaskRun = useStore((s) => s.recordTaskRun)
+  const token = useAuth((s) => s.token)
+
+  const [machines, setMachines] = useState<LiveMachine[]>([])
+  const [pickedExec, setPickedExec] = useState('')
+  const [running, setRunning] = useState(false)
+  const [output, setOutput] = useState('')
+  const [phase, setPhase] = useState<'idle' | 'done' | 'error'>('idle')
+  const [showPrompt, setShowPrompt] = useState(false)
+
+  useEffect(() => {
+    if (!token) return
+    let alive = true
+    const load = () => authApi.machines(token).then((r) => alive && setMachines(r.machines)).catch(() => {})
+    load()
+    const id = setInterval(load, 6000)
+    return () => {
+      alive = false
+      clearInterval(id)
+    }
+  }, [token])
+
+  const executors = machines
+    .filter((m) => m.online)
+    .flatMap((m) => m.executors.map((e) => ({ ...e, machineName: m.machine.name })))
+  const effectiveExec = pickedExec || executors.find((e) => e.status === 'idle')?.id || executors[0]?.id || ''
+  const fullPrompt = bot
+    ? `${assembleSystemPrompt(bot)}\n\n---\n\n# 任务：${task.title}\n\n${task.brief || task.description || '（无简报）'}`
+    : ''
+
+  async function dispatch() {
+    if (!bot || !effectiveExec || !token) return
+    setRunning(true)
+    setOutput('')
+    setPhase('idle')
+    let acc = ''
+    try {
+      await runExecutorStream(token, { executorId: effectiveExec, prompt: fullPrompt }, (e) => {
+        if (e.t === 'chunk') {
+          acc += e.text
+          setOutput(acc)
+        } else if (e.t === 'done') {
+          const final = e.result || acc
+          setOutput(final)
+          setPhase('done')
+          recordTaskRun(task.id, { output: final, ok: true })
+          toast('派单执行完成，产出已回填交付物', 'success')
+        } else if (e.t === 'error') {
+          setOutput((acc + '\n' + e.error).trim())
+          setPhase('error')
+          recordTaskRun(task.id, { output: '', ok: false })
+        }
+      })
+    } catch (e) {
+      setOutput((o) => (o + '\n' + (e as Error).message).trim())
+      setPhase('error')
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">
+        <Rocket size={12} /> 派单执行 · 真实算力
+      </div>
+      {!bot ? (
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-400">先在下方「负责员工」指派一个机器人——将用它的岗位说明书作为 system prompt。</p>
+      ) : executors.length === 0 ? (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 ring-1 ring-amber-200">
+          没有在线的本地算力。去「团队与账户 → 本地算力」绑定一台电脑，并保持 agent 运行。
+        </p>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <Avatar seed={bot.avatarSeed} name={bot.name} size={20} />
+            <span className="font-medium text-slate-700">{bot.name}</span>
+            <span className="text-slate-400">{bot.role}</span>
+            <button onClick={() => setShowPrompt((v) => !v)} className="ml-auto text-brand hover:underline">
+              {showPrompt ? '收起' : '看最终 prompt'}
+            </button>
+          </div>
+          {showPrompt && (
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-900 px-3 py-2 font-mono text-[10.5px] leading-relaxed text-emerald-200">
+              {fullPrompt}
+            </pre>
+          )}
+          <div className="flex gap-1.5">
+            <select
+              value={effectiveExec}
+              onChange={(e) => setPickedExec(e.target.value)}
+              className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-brand"
+            >
+              {executors.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.machineName} · {e.label}
+                  {e.status === 'busy' ? '（忙）' : ''}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={dispatch}
+              disabled={running || !effectiveExec}
+              className="flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+            >
+              {running ? <Loader2 size={13} className="animate-spin" /> : <Rocket size={13} />}
+              {running ? '执行中…' : '派单执行'}
+            </button>
+          </div>
+          {(running || output) && (
+            <div
+              className={cx(
+                'max-h-64 overflow-auto whitespace-pre-wrap rounded-lg px-3 py-2 font-mono text-[11px] leading-relaxed',
+                phase === 'error' ? 'bg-rose-50 text-rose-700 ring-1 ring-rose-200' : 'bg-slate-900 text-emerald-300',
+              )}
+            >
+              <div className="mb-1 flex items-center gap-1 text-slate-400">
+                <Cpu size={11} /> {bot.name} · claude 会话
+                {running && <Loader2 size={10} className="animate-spin" />}
+                {running && <span className="text-[10px]">实时回传中…</span>}
+              </div>
+              {output || (running ? '等待执行器输出…' : '(空)')}
+              {running && <span className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-emerald-400 align-middle" />}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 const KIND: Record<TaskKind, { label: string; icon: typeof FileText; cls: string }> = {
   doc: { label: '文档', icon: FileText, cls: 'bg-indigo-100 text-indigo-700' },
@@ -385,6 +523,9 @@ function TaskDrawer({ taskId, onClose }: { taskId: string; onClose: () => void }
                 ))}
             </select>
           </div>
+
+          {/* 派单执行（真实算力）*/}
+          <TaskDispatch task={task} />
 
           {/* 执行日志 */}
           {task.log.length > 0 && (

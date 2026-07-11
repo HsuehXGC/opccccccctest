@@ -54,6 +54,45 @@ export const authApi = {
     req<{ ok: true }>(`/machines/${machineId}`, { method: 'DELETE', token }),
 }
 
+type StreamEvent = { t: 'chunk'; text: string } | { t: 'done'; result: string } | { t: 'error'; error: string }
+
+/** 流式派单：读 SSE 响应体，逐块回调（会话内容实时显示用） */
+export async function runExecutorStream(
+  token: string,
+  body: { executorId: string; prompt: string },
+  onEvent: (e: StreamEvent) => void,
+): Promise<void> {
+  const res = await fetch(`${BASE}/agent/run-stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok || !res.body) {
+    const d = await res.json().catch(() => ({}))
+    throw new Error((d as { error?: string }).error || `请求失败 (${res.status})`)
+  }
+  const reader = res.body.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += dec.decode(value, { stream: true })
+    let idx
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const frame = buf.slice(0, idx)
+      buf = buf.slice(idx + 2)
+      const dataLine = frame.split('\n').find((l) => l.startsWith('data:'))
+      if (!dataLine) continue
+      try {
+        onEvent(JSON.parse(dataLine.slice(5).trim()) as StreamEvent)
+      } catch {
+        /* 忽略半包/坏帧 */
+      }
+    }
+  }
+}
+
 export interface LiveExecutor {
   id: string
   kind: 'claude' | 'codex'

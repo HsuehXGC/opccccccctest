@@ -125,6 +125,8 @@ interface State {
   ) => void
   addDependency: (taskId: string, dependsOnId: string) => void
   removeDependency: (taskId: string, dependsOnId: string) => void
+  /** 记录一次真实派单执行的结果：成功则回填交付物，并追加执行日志 */
+  recordTaskRun: (taskId: string, input: { output: string; ok: boolean }) => void
   /** 智能拆解：按需求正文 + 蓝图缺口，一键生成一组带 brief 的文档/执行任务（含缺口文档草稿）。返回生成的任务数 */
   decomposeRequirement: (requirementId: string) => number
 
@@ -341,6 +343,19 @@ export const useStore = create<State>()(
     set((s) => ({
       tasks: s.tasks.map((t) =>
         t.id === taskId ? { ...t, dependsOn: t.dependsOn.filter((d) => d !== dependsOnId) } : t,
+      ),
+    })),
+
+  recordTaskRun: (taskId, { output, ok }) =>
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId
+          ? {
+              ...t,
+              output: ok ? output : t.output,
+              log: [...t.log, ok ? '✓ 真实派单执行完成，产出已回填交付物' : '✗ 派单执行失败'].slice(-12),
+            }
+          : t,
       ),
     })),
 
