@@ -2,7 +2,8 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Users, Plus, Play, Loader2, Send, Sparkles, Trash2, FileText, ArrowLeft, Bot as BotIcon, ClipboardList, ListPlus } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useAuth } from '../store/useAuth'
-import { authApi, runExecutorStream } from '../lib/authApi'
+import { authApi } from '../lib/authApi'
+import { onCloudChange } from '../lib/cloudBus'
 import { buildProjectKnowledge, parseMeetingPlan, parseDocManifest, docAuthorPrompt, turnHead, turnTail, roundDirectiveText, pmHead, pmTail, MEETING_KIND } from '../lib/meeting'
 import { renderMarkdown } from '../lib/markdown'
 import { Avatar, cx, DOC_TYPE, DOC_TYPE_ORDER } from '../lib/ui'
@@ -390,7 +391,7 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
     }
   }
 
-  // 会议进行中：轮询云端状态，把发言/输出/状态合并到本地（关页面重开也能续看）
+  // 会议进行中：WS 推送即时刷新 + 慢轮询兜底，把发言/输出/状态合并到本地（关页面重开也能续看）
   useEffect(() => {
     if (!token || meeting?.status !== 'running') return
     let alive = true
@@ -407,10 +408,14 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
       }
     }
     poll()
-    const id = setInterval(poll, 3000)
+    const off = onCloudChange((kind) => {
+      if (kind === 'meetings') poll()
+    })
+    const id = setInterval(poll, 8000) // WS 为主，轮询兜底
     return () => {
       alive = false
       clearInterval(id)
+      off()
     }
   }, [token, meeting?.status, meetingId, mergeMeeting])
 
@@ -637,14 +642,13 @@ function AuthorDocsModal({
   defaultProductId: string | null
   onClose: () => void
 }) {
-  const addDoc = useStore((s) => s.addDoc)
+  const allDocs = useStore((s) => s.docs)
   const openDoc = useStore((s) => s.openDoc)
   const token = useAuth((s) => s.token)
   const items = useMemo(() => parseDocManifest(meeting.output), [meeting.output])
   const [checked, setChecked] = useState<boolean[]>(() => items.map(() => true))
   const [productId, setProductId] = useState<string | null>(defaultProductId)
   const [running, setRunning] = useState(false)
-  const [prog, setProg] = useState<{ i: number; total: number; title: string } | null>(null)
   const [created, setCreated] = useState<{ slug: string; title: string }[]>([])
 
   const product = products.find((p) => p.id === productId)
@@ -652,17 +656,7 @@ function AuthorDocsModal({
   const resolveBot = (role: string): Bot | undefined =>
     orgBots.find((b) => b.role === role) || orgBots.find((b) => b.role === '产品经理') || orgBots[0]
 
-  async function pickExec(): Promise<string | null> {
-    if (!token) return null
-    try {
-      const { machines } = await authApi.machines(token)
-      const online = machines.filter((m) => m.online).flatMap((m) => m.executors)
-      return online.find((e) => e.status === 'idle')?.id || online[0]?.id || null
-    } catch {
-      return null
-    }
-  }
-
+  // 入队云端 job：每篇文档一个 doc_author job，后端撰写、产出落库；全局对账据 meta 建文档
   async function authorAll() {
     if (running || !token) return
     if (!productId || !product) {
@@ -671,47 +665,28 @@ function AuthorDocsModal({
     }
     const chosen = items.filter((_, i) => checked[i])
     if (chosen.length === 0) return
-    const exec = await pickExec()
-    if (!exec) {
-      toast('没有在线的本地算力。去「团队与账户 → 本地算力」绑定电脑并保持 agent 运行。', 'warn')
-      return
-    }
     setRunning(true)
-    const done: { slug: string; title: string }[] = []
-    for (let i = 0; i < chosen.length; i++) {
-      const item = chosen[i]
-      const bot = resolveBot(item.ownerRole)
-      setProg({ i, total: chosen.length, title: item.title })
-      const prompt = docAuthorPrompt(bot ?? orgBots[0], meeting, product, knowledge, item)
-      let acc = ''
-      try {
-        await runExecutorStream(token, { executorId: exec, prompt, planMode: true }, (e) => {
-          if (e.t === 'chunk') {
-            if (!e.text.startsWith('[agent]')) acc += e.text
-          } else if (e.t === 'done' && e.result) acc = e.result
-          else if (e.t === 'error') acc = (acc + '\n⚠️ ' + e.error).trim()
-        })
-      } catch (err) {
-        acc = '⚠️ ' + (err as Error).message
-      }
-      const content = acc.trim() || `# ${item.title}\n\n（未产出内容）`
-      const slug = `doc-${Math.random().toString(36).slice(2, 10)}`
-      addDoc({
-        slug,
-        title: item.title,
-        type: item.type,
-        productId,
-        productVersion: product.currentVersion,
-        requirementId: null,
-        ownerBotId: bot?.id ?? null,
-        content,
+    try {
+      const jobs = chosen.map((item) => {
+        const bot = resolveBot(item.ownerRole)
+        const slug = `doc-${Math.random().toString(36).slice(2, 10)}`
+        return {
+          kind: 'doc_author',
+          refType: 'doc',
+          refId: slug,
+          title: item.title,
+          prompt: docAuthorPrompt(bot ?? orgBots[0], meeting, product, knowledge, item),
+          meta: { slug, title: item.title, type: item.type, productId, productVersion: product.currentVersion, ownerBotId: bot?.id ?? null },
+        }
       })
-      done.push({ slug, title: item.title })
-      setCreated([...done])
+      await authApi.enqueueJobs(token, jobs)
+      setCreated(jobs.map((j) => ({ slug: j.refId, title: j.title })))
+      toast(`已入队 ${jobs.length} 篇文档到云端撰写——关页面也不影响，写好自动进文档中心`, 'success')
+    } catch (err) {
+      toast('入队失败：' + (err as Error).message, 'warn')
+    } finally {
+      setRunning(false)
     }
-    setProg(null)
-    setRunning(false)
-    toast(`已撰写 ${done.length} 篇文档并存入文档中心`, 'success')
   }
 
   return (
@@ -734,13 +709,14 @@ function AuthorDocsModal({
           <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
             {items.map((it, i) => {
               const bot = resolveBot(it.ownerRole)
-              const madeIdx = created.findIndex((c) => c.title === it.title)
+              const enq = created.find((c) => c.title === it.title)
+              const madeDoc = enq && allDocs.find((d) => d.slug === enq.slug)
               return (
                 <label key={i} className="flex cursor-pointer items-start gap-2 rounded px-1.5 py-1 text-sm hover:bg-slate-50">
                   <input
                     type="checkbox"
                     checked={checked[i]}
-                    disabled={running}
+                    disabled={running || !!enq}
                     onChange={() => setChecked((c) => c.map((v, j) => (j === i ? !v : v)))}
                     className="mt-1 accent-brand"
                   />
@@ -748,38 +724,40 @@ function AuthorDocsModal({
                     <span className="font-medium">{it.title}</span>
                     <span className="ml-1.5 rounded bg-slate-100 px-1 text-[10px] text-slate-500">{DOC_TYPE[it.type]?.label ?? it.type}</span>
                     <span className="ml-1 text-[11px] text-slate-400">· {bot?.name ?? '?'}（{it.ownerRole}）</span>
-                    {madeIdx >= 0 && (
+                    {madeDoc ? (
                       <button
                         onClick={(e) => {
                           e.preventDefault()
                           onClose()
-                          if (productId) openDoc(productId, created[madeIdx].slug)
+                          if (productId) openDoc(productId, enq!.slug)
                         }}
                         className="ml-1.5 text-[11px] font-medium text-emerald-600 hover:underline"
                       >
                         ✓ 已写成，查看
                       </button>
-                    )}
+                    ) : enq ? (
+                      <span className="ml-1.5 text-[11px] text-brand">云端撰写中…</span>
+                    ) : null}
                   </span>
                 </label>
               )
             })}
           </div>
-          <p className="mt-2 text-[11px] text-slate-400">每篇由对应负责角色的机器人真实撰写（占用本地算力，按篇串行）。写好即存入文档中心，走版本流。</p>
+          <p className="mt-2 text-[11px] text-slate-400">每篇入队云端由对应角色撰写——关页面也不影响，写好自动进文档中心。</p>
         </>
       )}
       <div className="mt-4 flex justify-end gap-2">
         <button onClick={onClose} disabled={running} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-50">
           {created.length ? '完成' : '取消'}
         </button>
-        {items.length > 0 && (
+        {items.length > 0 && created.length === 0 && (
           <button
             onClick={authorAll}
             disabled={running || n === 0 || !productId}
             className="flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
           >
             {running ? <Loader2 size={15} className="animate-spin" /> : <FileText size={15} />}
-            {running && prog ? `撰写中 ${prog.i + 1}/${prog.total}…` : `撰写 ${n} 篇`}
+            {running ? '入队中…' : `撰写 ${n} 篇`}
           </button>
         )}
       </div>

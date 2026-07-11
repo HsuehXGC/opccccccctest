@@ -9,12 +9,14 @@ import { migrate, dbEnabled } from './db.ts'
 import { startScheduler } from './scheduler.ts'
 import { createJob, listJobs, getJob } from './jobStore.ts'
 import { importSnapshot, getOrgState, orgHasData } from './stateStore.ts'
-import { orchestrateMeeting, getMeeting, isMeetingRunning, orgHasExecutor, type MeetingRunPayload } from './meetingRunner.ts'
+import { orchestrateMeeting, getMeeting, isMeetingRunning, orgHasExecutor, recoverMeetings, type MeetingRunPayload } from './meetingRunner.ts'
+import { addBusConn } from './bus.ts'
 import {
   changePassword,
   createMember,
   login,
   openRoot,
+  orgFromToken,
   orgUsers,
   registerRoot,
   requireAuth,
@@ -41,6 +43,10 @@ initStore()
 if (dbEnabled) {
   migrate()
     .then(startScheduler)
+    .then(async () => {
+      const n = await recoverMeetings().catch(() => 0)
+      if (n) console.log(`↻ 恢复 ${n} 场中断的会议编排`)
+    })
     .catch((e) => console.error('✗ DB 初始化失败：', (e as Error).message))
 } else {
   console.warn('⚠ 未配置 DATABASE_URL，云端调度未启用（仍可用旧的前端直连派单）')
@@ -255,6 +261,7 @@ app.post('/api/jobs', requireAuth, async (req: AuthedRequest, res) => {
           title: j.title ?? '',
           prompt: String(j.prompt),
           mode: j.mode ?? null,
+          meta: j.meta ?? null,
         }),
       )
     }
@@ -340,9 +347,51 @@ const server = app.listen(PORT, () => {
   console.log(`✓ OPC backend (auth + agent gateway) on http://localhost:${PORT}`)
 })
 
+// ── /ws 客户端 WebSocket：前端订阅账户组变更（job/会议完成即时推送）──────────
+// 注意：两个 WS 服务器共用一个 http server，必须用 noServer + 单一 upgrade 路由，
+// 否则各自监听 upgrade 会相互干扰（RSV1 帧错误）。
+const clientWss = new WebSocketServer({ noServer: true })
+clientWss.on('connection', (ws) => {
+  let removeConn: (() => void) | null = null
+  const closeIdle = setTimeout(() => ws.close(), 10_000) // 10s 内未鉴权则关
+  ws.on('message', (raw) => {
+    let msg: { t?: string; token?: string }
+    try {
+      msg = JSON.parse(raw.toString())
+    } catch {
+      return
+    }
+    if (msg.t === 'auth' && !removeConn) {
+      const orgId = msg.token ? orgFromToken(msg.token) : null
+      if (!orgId) {
+        ws.send(JSON.stringify({ t: 'error', error: '鉴权失败' }))
+        ws.close()
+        return
+      }
+      clearTimeout(closeIdle)
+      removeConn = addBusConn({ orgId, send: (s) => ws.send(s) })
+      ws.send(JSON.stringify({ t: 'ready' }))
+    }
+  })
+  const drop = () => {
+    clearTimeout(closeIdle)
+    removeConn?.()
+  }
+  ws.on('close', drop)
+  ws.on('error', drop)
+})
+
 // ── /agent WebSocket：内网 agent 出站接入的落点 ───────────────
 // agent 出站建 wss 长连接 → 首帧 enroll → attach → heartbeat / job 回传中继。
-const wss = new WebSocketServer({ server, path: '/agent' })
+const wss = new WebSocketServer({ noServer: true })
+
+// 单一 upgrade 路由：按路径分发到对应的 WS 服务器
+server.on('upgrade', (req, socket, head) => {
+  const path = (req.url || '').split('?')[0]
+  if (path === '/ws') clientWss.handleUpgrade(req, socket, head, (ws) => clientWss.emit('connection', ws, req))
+  else if (path === '/agent') wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+  else socket.destroy()
+})
 wss.on('connection', (ws) => {
   let machineId: string | null = null
   ws.on('message', (raw) => {

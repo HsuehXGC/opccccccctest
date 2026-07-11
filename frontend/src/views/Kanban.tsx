@@ -5,7 +5,6 @@ import { useAuth } from '../store/useAuth'
 import { authApi, runExecutorStream, type LiveMachine } from '../lib/authApi'
 import { assembleSystemPrompt } from '../lib/botCharter'
 import { assignPrompt, parseAssignments, heuristicAssign } from '../lib/assign'
-import { applyJobsToTasks } from '../lib/cloudJobs'
 import { toast } from '../lib/toast'
 import { Avatar, DOC_TYPE, PriorityBadge, TASK_COLUMNS, cx } from '../lib/ui'
 import type { Task, TaskKind, TaskStatus } from '../types'
@@ -728,19 +727,6 @@ export function Kanban() {
     }
   }, [focusTaskId, clearFocusTask])
 
-  // 云端调度对账：轮询 jobs，把后端跑出的产出回填到本地任务（关页面后重开也能同步）
-  const token = useAuth((s) => s.token)
-  useEffect(() => {
-    if (!token) return
-    let alive = true
-    const poll = () => authApi.listJobs(token, {}).then((r) => alive && applyJobsToTasks(r.jobs)).catch(() => {})
-    poll()
-    const id = setInterval(poll, 5000)
-    return () => {
-      alive = false
-      clearInterval(id)
-    }
-  }, [token])
 
   const products = allProducts.filter((p) => p.projectId === currentProjectId)
   const projectProductIds = useMemo(() => new Set(products.map((p) => p.id)), [products])

@@ -185,3 +185,9 @@ CREATE INDEX IF NOT EXISTS idx_products_org ON products(org_id);
 CREATE INDEX IF NOT EXISTS idx_req_org ON requirements(org_id);
 CREATE INDEX IF NOT EXISTS idx_docs_org ON docs(org_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_org ON tasks(org_id);
+
+-- 会议编排负载（含各角色 prompt 片段），进程重启后据此恢复运行中的会议
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS run_payload jsonb;
+
+-- job 附带元数据（如文档撰写 job 的 doc 元信息），供前端据产出重建实体
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS meta jsonb;

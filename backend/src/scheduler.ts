@@ -2,6 +2,7 @@ import { gateway } from './agentGateway.ts'
 import type { JobEvent } from './agentProtocol.ts'
 import { q } from './db.ts'
 import { claimable, markRunning, markDone, markError, updateProgress, recoverStuck, type Job } from './jobStore.ts'
+import { notifyOrg } from './bus.ts'
 
 // ── 云端常驻调度器 ─────────────────────────────────────────────
 // 每隔一段时间捞出 queued job，为其账户组挑一个在线执行器，派单、落库产出。
@@ -88,10 +89,12 @@ function startJob(job: Job, executorId: string): void {
       const out = e.result || acc
       await markDone(job.id, out, chunks)
       await onTaskDone(job, out)
+      notifyOrg(job.org_id, 'jobs')
     } else if (e.type === 'error') {
       cleanup()
       await markError(job.id, e.error)
       await onTaskError(job)
+      notifyOrg(job.org_id, 'jobs')
     }
   }
 

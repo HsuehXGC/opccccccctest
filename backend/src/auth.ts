@@ -36,6 +36,12 @@ function verifyToken(token: string): JwtPayload | null {
   }
 }
 
+/** 校验用户 token → 账户组（WS 客户端鉴权用） */
+export function orgFromToken(token: string): string | null {
+  const p = verifyToken(token)
+  return p ? p.orgId : null
+}
+
 // ── agent 长期凭证（JWT，支持断线/重启后重连，无需重新绑定）──────────
 export const signAgentToken = (orgId: string, name: string) =>
   jwt.sign({ typ: 'agent', orgId, name }, SECRET, { expiresIn: '365d' })

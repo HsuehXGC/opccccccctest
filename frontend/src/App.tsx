@@ -7,6 +7,9 @@ import { Toaster } from './lib/toast'
 import { CommandPalette } from './components/CommandPalette'
 import { bootstrapImport } from './lib/bootstrapImport'
 import { bootstrapCloud, startAutoSync } from './lib/cloudBridge'
+import { applyJobs } from './lib/cloudJobs'
+import { connectBus, onCloudChange } from './lib/cloudBus'
+import { authApi } from './lib/authApi'
 import { Dashboard } from './views/Dashboard'
 import { ProductWorkspace } from './views/ProductWorkspace'
 import { Wiki } from './views/Wiki'
@@ -62,6 +65,24 @@ export function App() {
   useEffect(() => {
     if (!authToken || !authUser) return
     void bootstrapCloud(authToken).then(() => startAutoSync())
+  }, [authToken, authUser])
+
+  // 全局 job 对账：WS 推送即时刷新 + 慢轮询兜底，把云端产出回填本地任务/文档
+  useEffect(() => {
+    if (!authToken || !authUser) return
+    let alive = true
+    const poll = () => authApi.listJobs(authToken, {}).then((r) => alive && applyJobs(r.jobs)).catch(() => {})
+    poll()
+    connectBus()
+    const off = onCloudChange((kind) => {
+      if (kind === 'jobs' || kind === 'state') poll()
+    })
+    const id = setInterval(poll, 15000) // WS 为主，轮询兜底
+    return () => {
+      alive = false
+      clearInterval(id)
+      off()
+    }
   }, [authToken, authUser])
 
   // 模拟机器人执行的心跳

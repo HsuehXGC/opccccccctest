@@ -119,6 +119,7 @@ export interface CloudJob {
   output: string
   error: string | null
   chunks: number
+  meta?: Record<string, unknown> | null
   created_at: number
 }
 
