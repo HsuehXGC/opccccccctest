@@ -1,9 +1,9 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Users, Plus, Play, Loader2, Send, Sparkles, Trash2, FileText, ArrowLeft, Bot as BotIcon, ClipboardList, ListPlus } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useAuth } from '../store/useAuth'
 import { authApi, runExecutorStream } from '../lib/authApi'
-import { botTurnPrompt, pmConsolidatePrompt, buildProjectKnowledge, parseMeetingPlan, docManifestPrompt, parseDocManifest, docAuthorPrompt, MEETING_KIND } from '../lib/meeting'
+import { buildProjectKnowledge, parseMeetingPlan, parseDocManifest, docAuthorPrompt, turnHead, turnTail, roundDirectiveText, pmHead, pmTail, MEETING_KIND } from '../lib/meeting'
 import { renderMarkdown } from '../lib/markdown'
 import { Avatar, cx, DOC_TYPE, DOC_TYPE_ORDER } from '../lib/ui'
 import { Modal, Field, inputCls } from '../components/Modal'
@@ -315,16 +315,11 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
   const allTasks = useStore((s) => s.tasks)
   const token = useAuth((s) => s.token)
   const addMeetingMessage = useStore((s) => s.addMeetingMessage)
-  const appendMeetingMessage = useStore((s) => s.appendMeetingMessage)
-  const setMeetingMessage = useStore((s) => s.setMeetingMessage)
   const setMeetingStatus = useStore((s) => s.setMeetingStatus)
-  const setMeetingOutput = useStore((s) => s.setMeetingOutput)
+  const mergeMeeting = useStore((s) => s.mergeMeeting)
   const setMeetingReferences = useStore((s) => s.setMeetingReferences)
 
   const [busy, setBusy] = useState(false)
-  const [speaking, setSpeaking] = useState<string | null>(null)
-  const [round, setRound] = useState(0)
-  const [consolidating, setConsolidating] = useState(false)
   const [draft, setDraft] = useState('')
   const [genOpen, setGenOpen] = useState(false)
   const [saveDocOpen, setSaveDocOpen] = useState(false)
@@ -334,6 +329,12 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
   const product = meeting.productId ? products.find((p) => p.id === meeting.productId) ?? null : null
   const participants = meeting.participantBotIds.map((id) => bots.find((b) => b.id === id)).filter((b): b is Bot => !!b)
   const pm = participants.find((b) => b.role === '产品经理') || bots.find((b) => b.role === '产品经理' && b.orgId === meeting.orgId) || participants[0]
+
+  // 运行态派生（云端编排，进度靠轮询）：当前轮、是否在整理阶段
+  const isRunning = meeting.status === 'running'
+  const totalTurns = participants.length * Math.max(1, meeting.rounds ?? 1)
+  const curRound = isRunning ? Math.min(Math.max(1, meeting.rounds ?? 1), Math.floor(meeting.messages.length / Math.max(1, participants.length)) + 1) : 0
+  const consolidating = isRunning && meeting.messages.length >= totalTurns && !meeting.output
 
   // 项目级知识库：覆盖项目下全部产品，作为会议完整背景（聚焦选中产品）
   const project = projects.find((p) => p.id === meeting.projectId)
@@ -354,97 +355,64 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
 
   const cur = () => useStore.getState().meetings.find((m) => m.id === meetingId)!
 
-  async function pickExecutor(): Promise<string | null> {
-    if (!token) return null
-    try {
-      const { machines } = await authApi.machines(token)
-      const online = machines.filter((m) => m.online).flatMap((m) => m.executors)
-      return online.find((e) => e.status === 'idle')?.id || online[0]?.id || null
-    } catch {
-      return null
-    }
-  }
-
+  // 开始会议：把各角色 prompt 片段发给后端，由云端常驻编排（关页面不中断）；本地轮询看进度
   async function runMeeting() {
     if (busy || !token) return
-    const exec = await pickExecutor()
-    if (!exec) {
-      toast('没有在线的本地算力。去「团队与账户 → 本地算力」绑定电脑并保持 agent 运行。', 'warn')
-      return
-    }
     setBusy(true)
-    setMeetingStatus(meetingId, 'running')
     try {
-      // 一位虚拟人力在第 round 轮发言：建气泡→流式回填。prior 为该发言可见的已有记录。
-      const speak = async (bot: Bot, prior: ReturnType<typeof cur>['messages'], round: number) => {
-        const msgId = addMeetingMessage(meetingId, {
-          speakerType: 'bot',
-          speakerId: bot.id,
-          speakerName: bot.name,
-          speakerRole: bot.role,
-          avatarSeed: bot.avatarSeed,
-          content: '',
-          round,
-        })
-        const prompt = botTurnPrompt(bot, cur(), prior, product, knowledge, round)
-        try {
-          await runExecutorStream(token, { executorId: exec, prompt, planMode: true }, (e) => {
-            if (e.t === 'chunk') {
-              if (!e.text.startsWith('[agent]')) appendMeetingMessage(meetingId, msgId, e.text)
-            } else if (e.t === 'done' && e.result) setMeetingMessage(meetingId, msgId, e.result)
-            else if (e.t === 'error') setMeetingMessage(meetingId, msgId, '⚠️ ' + e.error)
-          })
-        } catch (err) {
-          setMeetingMessage(meetingId, msgId, '⚠️ ' + (err as Error).message)
-        }
+      const m = cur()
+      const rounds = Math.max(1, m.rounds ?? 1)
+      const turns = participants.map((bot) => ({
+        botId: bot.id,
+        name: bot.name,
+        role: bot.role,
+        avatarSeed: bot.avatarSeed,
+        head: turnHead(bot, m, product, knowledge),
+        tail: turnTail(bot),
+      }))
+      const payload = {
+        meeting: m,
+        rounds,
+        parallel: !!m.parallel,
+        kind: m.kind,
+        turns,
+        roundDirectives: Array.from({ length: rounds - 1 }, (_, i) => roundDirectiveText(i + 2)),
+        pm: { head: pmHead(pm, m, product, knowledge, m.kind), tail: pmTail(m.kind) },
       }
-
-      // 多轮讨论：第 1 轮各自表态；≥2 轮时后续轮次能看到他人上一轮的发言、相互反应/收敛
-      const rounds = Math.max(1, cur().rounds ?? 1)
-      for (let r = 1; r <= rounds; r++) {
-        setRound(r)
-        if (cur().parallel) {
-          // 并行：本轮所有 bot 只看到「本轮开始前」的快照（轮内互不可见，跨轮可见）
-          const basePrior = cur().messages
-          setSpeaking('*')
-          await Promise.all(participants.map((bot) => speak(bot, basePrior, r)))
-        } else {
-          // 顺序：你一言我一语，后者能看到前者（含本轮更早发言者）的发言
-          for (const bot of participants) {
-            setSpeaking(bot.id)
-            await speak(bot, cur().messages, r)
-          }
-        }
-      }
-      setSpeaking(null)
-      setRound(0)
-      // 产品经理会后整理：文档撰写会 → 产出《文档清单》；其它 → 执行计划+纪要
-      setConsolidating(true)
-      const pmPrompt =
-        cur().kind === 'docgen'
-          ? docManifestPrompt(pm, cur(), cur().messages, product, knowledge)
-          : pmConsolidatePrompt(pm, cur(), cur().messages, product, knowledge)
-      let out = ''
-      await runExecutorStream(token, { executorId: exec, prompt: pmPrompt, planMode: true }, (e) => {
-        if (e.t === 'chunk') {
-          out += e.text
-          setMeetingOutput(meetingId, out)
-        } else if (e.t === 'done' && e.result) {
-          out = e.result
-          setMeetingOutput(meetingId, out)
-        } else if (e.t === 'error') {
-          out = (out + '\n⚠️ ' + e.error).trim()
-          setMeetingOutput(meetingId, out)
-        }
-      })
-      setMeetingStatus(meetingId, 'done')
-      toast(cur().kind === 'docgen' ? '会议结束，产品经理已拟好《文档清单》，可开始撰写' : '会议结束，产品经理已整理出执行计划与纪要', 'success')
+      await authApi.runMeeting(token, meetingId, payload)
+      setMeetingStatus(meetingId, 'running')
+      mergeMeeting(meetingId, { messages: [], output: '' })
+      toast('会议已在云端开始，后端编排中——关页面/刷新都不影响，进度会自动刷新', 'success')
+    } catch (err) {
+      toast('开会失败：' + (err as Error).message, 'warn')
     } finally {
       setBusy(false)
-      setSpeaking(null)
-      setConsolidating(false)
     }
   }
+
+  // 会议进行中：轮询云端状态，把发言/输出/状态合并到本地（关页面重开也能续看）
+  useEffect(() => {
+    if (!token || meeting?.status !== 'running') return
+    let alive = true
+    const poll = async () => {
+      try {
+        const { meeting: cloud, running } = await authApi.getMeeting(token, meetingId)
+        if (!alive) return
+        mergeMeeting(meetingId, cloud as Partial<Meeting>)
+        if (!running && (cloud as { status?: string }).status === 'done') {
+          toast((cloud as { kind?: string }).kind === 'docgen' ? '会议结束，已拟好《文档清单》' : '会议结束，已整理执行计划与纪要', 'success')
+        }
+      } catch {
+        /* 下轮再试 */
+      }
+    }
+    poll()
+    const id = setInterval(poll, 3000)
+    return () => {
+      alive = false
+      clearInterval(id)
+    }
+  }, [token, meeting?.status, meetingId, mergeMeeting])
 
   function sendUserMsg() {
     if (!draft.trim()) return
@@ -508,7 +476,7 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <span className="text-[11px] text-slate-400">参会：</span>
           {participants.map((b) => {
-            const active = speaking === b.id || speaking === '*'
+            const active = isRunning
             return (
               <span
                 key={b.id}
@@ -521,8 +489,8 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
             )
           })}
           {meeting.parallel && <span className="text-[10px] text-slate-400">· 并行发言</span>}
-          {busy && round > 0 && (meeting.rounds ?? 1) > 1 && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-brand-soft px-2 py-0.5 text-[10px] font-medium text-brand">第 {round}/{meeting.rounds} 轮</span>
+          {isRunning && (meeting.rounds ?? 1) > 1 && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand-soft px-2 py-0.5 text-[10px] font-medium text-brand">第 {curRound}/{meeting.rounds} 轮</span>
           )}
           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700 ring-1 ring-emerald-200">你（主持）</span>
         </div>

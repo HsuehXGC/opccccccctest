@@ -160,6 +160,8 @@ interface State {
   setMeetingMessage: (meetingId: string, msgId: string, content: string) => void
   setMeetingStatus: (meetingId: string, status: MeetingStatus) => void
   setMeetingOutput: (meetingId: string, output: string) => void
+  /** 用云端会议状态合并本地（编排进度轮询用） */
+  mergeMeeting: (meetingId: string, patch: Partial<Meeting>) => void
   removeMeeting: (meetingId: string) => void
 
   // 产品文档 Wiki
@@ -583,6 +585,8 @@ export const useStore = create<State>()(
     set((s) => ({ meetings: s.meetings.map((m) => (m.id === meetingId ? { ...m, status } : m)) })),
   setMeetingOutput: (meetingId, output) =>
     set((s) => ({ meetings: s.meetings.map((m) => (m.id === meetingId ? { ...m, output } : m)) })),
+  mergeMeeting: (meetingId, patch) =>
+    set((s) => ({ meetings: s.meetings.map((m) => (m.id === meetingId ? { ...m, ...patch } : m)) })),
   removeMeeting: (meetingId) => set((s) => ({ meetings: s.meetings.filter((m) => m.id !== meetingId) })),
 
   addDoc: ({ slug, title, type, productId, productVersion, requirementId, ownerBotId, relations, content }) =>

@@ -9,6 +9,7 @@ import { migrate, dbEnabled } from './db.ts'
 import { startScheduler } from './scheduler.ts'
 import { createJob, listJobs, getJob } from './jobStore.ts'
 import { importSnapshot, getOrgState, orgHasData } from './stateStore.ts'
+import { orchestrateMeeting, getMeeting, isMeetingRunning, orgHasExecutor, type MeetingRunPayload } from './meetingRunner.ts'
 import {
   changePassword,
   createMember,
@@ -311,6 +312,27 @@ app.get('/api/state', requireAuth, async (req: AuthedRequest, res) => {
 app.get('/api/state/meta', requireAuth, async (req: AuthedRequest, res) => {
   if (!dbEnabled) return res.json({ enabled: false, hasData: false })
   res.json({ enabled: true, hasData: await orgHasData(req.auth!.user.orgId) })
+})
+
+// ── 云端会议编排：开始会议（后端常驻编排，关页面不中断）+ 轮询状态 ──────────
+app.post('/api/meetings/:id/run', requireAuth, async (req: AuthedRequest, res) => {
+  if (!dbEnabled) return res.status(503).json({ error: '云端会议未启用' })
+  const orgId = req.auth!.user.orgId
+  const payload = req.body as MeetingRunPayload
+  const mid = String(req.params.id)
+  if (!payload?.meeting || payload.meeting.id !== mid) return res.status(400).json({ error: 'meeting 负载不合法' })
+  if (isMeetingRunning(mid)) return res.status(409).json({ error: '该会议正在进行中' })
+  if (!orgHasExecutor(orgId)) return res.status(400).json({ error: '没有在线的本地算力，无法开会' })
+  // 异步编排，立即返回；前端轮询 /api/meetings/:id 看进度
+  void orchestrateMeeting(orgId, payload)
+  res.json({ ok: true, running: true })
+})
+
+app.get('/api/meetings/:id', requireAuth, async (req: AuthedRequest, res) => {
+  if (!dbEnabled) return res.status(404).json({ error: '未启用' })
+  const meeting = await getMeeting(req.auth!.user.orgId, String(req.params.id))
+  if (!meeting) return res.status(404).json({ error: '会议不存在' })
+  res.json({ meeting, running: isMeetingRunning(String(req.params.id)) })
 })
 
 const PORT = Number(process.env.PORT) || 8787

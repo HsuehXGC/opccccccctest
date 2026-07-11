@@ -208,6 +208,21 @@ export function botTurnPrompt(
   return base.join('\n')
 }
 
+// ── 供云端编排：把发言 prompt 拆成 head（到「## 已有发言」）+ tail（收尾） ──
+// 后端按 head + transcript(已有发言) + tail 拼接，逻辑单一来源在本文件。
+export function turnHead(bot: Bot, meeting: Meeting, product: Product | null, knowledge: string): string {
+  return [assembleSystemPrompt(bot), '', '---', '', context(meeting, product), '', knowledge, '', '## 已有发言', ''].join('\n')
+}
+export function turnTail(bot: Bot): string {
+  return [
+    '',
+    '## 你的发言',
+    `你正在参加这个会议。请**结合上面的背景知识库**（产品现状、需求、文档、任务），以${bot.role}的视角针对议题发表专业意见：关注点、风险、建议，以及你负责部分的初步计划。`,
+    `要具体、扣住产品实际情况，不要泛泛而谈。以「计划模式」思考——只讨论与规划，不执行任何改动。控制在 250–450 字，直接给内容、不要寒暄。`,
+  ].join('\n')
+}
+export const roundDirectiveText = (round: number) => roundDirective(round)
+
 // ── 文档撰写会 ─────────────────────────────────────────────
 /** 标签→DocType 反查（用于解析清单里的「类型」） */
 const DOC_LABEL_TO_TYPE: Record<string, DocType> = Object.fromEntries(
@@ -321,6 +336,47 @@ export function pmConsolidatePrompt(
     '## 一、执行计划',
     '分阶段、分角色的可执行任务清单。每项包含：负责角色、任务、产出物、验收要点、依赖。尽量对应到参会角色与产品现有需求/文档。',
     '',
+    '## 二、会议纪要',
+    '详细展开：① 背景与目标 ② 各角色关键意见汇总 ③ 达成的决策 ④ 遗留问题与风险 ⑤ 后续行动项（谁、做什么、何时）。',
+  ].join('\n')
+}
+
+/** PM 整理 prompt 的 head（到「完整会议/讨论记录」）+ tail（输出要求）——供云端编排拼接 */
+export function pmHead(pm: Bot, meeting: Meeting, product: Product | null, knowledge: string, kind: MeetingKind): string {
+  if (kind === 'docgen') {
+    return [
+      assembleSystemPrompt(pm), '', '---', '',
+      '# 会后整理任务：拟定《文档撰写清单》',
+      '你是本次「文档撰写会」的产品经理。基于上面的背景（尤其「已完成任务的产出」）与下方讨论，列出本项目现在应当撰写的**全部正式项目文档**，并分派到负责角色。',
+      '', context(meeting, product), '', knowledge, '',
+      '## 完整讨论记录', '',
+    ].join('\n')
+  }
+  return [
+    assembleSystemPrompt(pm), '', '---', '',
+    '# 会后整理任务',
+    `你是本次会议的产品经理，负责会后整理输出，指导后续工作。`,
+    '', context(meeting, product), '', knowledge, '',
+    '## 完整会议记录', '',
+  ].join('\n')
+}
+export function pmTail(kind: MeetingKind): string {
+  if (kind === 'docgen') {
+    const types = DOC_TYPE_ORDER.map((t) => DOC_TYPE[t].label).join('、')
+    return [
+      '', '## 你的输出（严格格式，供系统解析）',
+      '先写一行「## 文档清单」，随后**每篇文档一行**，严格用以下格式（用全角竖线 ｜ 分隔四段，不要加表格）：',
+      '`- 文档标题 ｜ 类型 ｜ 负责角色 ｜ 一句话要点（这篇要覆盖什么）`',
+      `其中「类型」只能从这些里选一个：${types}。`,
+      '「负责角色」从参会角色里选最合适的一个。覆盖项目需要的各类文档（愿景/需求/架构/接口/数据/设计/测试/发布等按需），不要遗漏，也不要为凑数硬造。',
+      '清单之后可另起「## 说明」简述取舍，但清单行必须严格如上格式。',
+    ].join('\n')
+  }
+  return [
+    '', '## 你的输出（Markdown 格式，详细、可落地，紧扣产品实际情况）',
+    '严格按以下两部分输出：', '',
+    '## 一、执行计划',
+    '分阶段、分角色的可执行任务清单。每项包含：负责角色、任务、产出物、验收要点、依赖。尽量对应到参会角色与产品现有需求/文档。', '',
     '## 二、会议纪要',
     '详细展开：① 背景与目标 ② 各角色关键意见汇总 ③ 达成的决策 ④ 遗留问题与风险 ⑤ 后续行动项（谁、做什么、何时）。',
   ].join('\n')

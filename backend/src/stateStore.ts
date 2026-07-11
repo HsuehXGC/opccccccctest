@@ -72,7 +72,8 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
     await q(
       `INSERT INTO meetings (id, org_id, project_id, product_id, title, agenda, kind, status, participant_bot_ids, refs, full_doc_slugs, parallel, rounds, output, created_at, raw)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-       ON CONFLICT (id) DO UPDATE SET project_id=$3, product_id=$4, title=$5, agenda=$6, kind=$7, status=$8, participant_bot_ids=$9, refs=$10, full_doc_slugs=$11, parallel=$12, rounds=$13, output=$14, raw=$16`,
+       ON CONFLICT (id) DO UPDATE SET project_id=$3, product_id=$4, title=$5, agenda=$6, kind=$7, status=$8, participant_bot_ids=$9, refs=$10, full_doc_slugs=$11, parallel=$12, rounds=$13, output=$14, raw=$16
+       WHERE meetings.status <> 'running'`,
       [m.id, orgId, m.projectId ?? null, m.productId ?? null, m.title ?? '', m.agenda ?? '', m.kind ?? 'kickoff', m.status ?? 'draft', J(m.participantBotIds ?? []), m.references ?? '', J(m.fullDocSlugs ?? []), !!m.parallel, m.rounds ?? 1, m.output ?? '', m.createdAt ?? 0, J(m)],
     )
   }
