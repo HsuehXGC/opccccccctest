@@ -1,16 +1,18 @@
 import { useState } from 'react'
-import { Plus, Pause, Play, Power, Cpu } from 'lucide-react'
+import { Plus, Pause, Play, Power, Cpu, SlidersHorizontal } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { Avatar, BOT_STATUS, StatusDot, cx } from '../lib/ui'
 import { Modal, Field, inputCls } from '../components/Modal'
+import { CharterModal } from '../components/CharterModal'
 import type { Bot, BotRole } from '../types'
 
-const ROLES: BotRole[] = ['全栈工程', '前端', '后端', '数据分析', '文案运营', '测试', '调研']
+const ROLES: BotRole[] = ['产品经理', '项目经理', '全栈工程', '前端', '后端', '数据分析', '文案运营', '测试', '调研']
 const MODELS = ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5']
 
 function BotCard({ bot }: { bot: Bot }) {
   const task = useStore((s) => s.tasks.find((t) => t.id === bot.currentTaskId))
   const setBotStatus = useStore((s) => s.setBotStatus)
+  const [configOpen, setConfigOpen] = useState(false)
   const s = BOT_STATUS[bot.status]
 
   return (
@@ -58,6 +60,14 @@ function BotCard({ bot }: { bot: Bot }) {
         )}
       </div>
 
+      {/* 配置提示词 */}
+      <button
+        onClick={() => setConfigOpen(true)}
+        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 py-1.5 text-xs font-medium text-slate-600 transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
+      >
+        <SlidersHorizontal size={13} /> 配置提示词
+      </button>
+
       <div className="mt-3 flex items-center justify-between">
         <span className="text-xs text-slate-400">累计完成 {bot.completed} 个任务</span>
         <div className="flex gap-1">
@@ -96,6 +106,8 @@ function BotCard({ bot }: { bot: Bot }) {
         </div>
       </div>
       <span className={cx('sr-only', s.text)}>{s.label}</span>
+
+      {configOpen && <CharterModal bot={bot} onClose={() => setConfigOpen(false)} />}
     </div>
   )
 }

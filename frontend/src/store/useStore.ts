@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import type {
   Account,
   Bot,
+  BotCharter,
   BotRole,
   DocRelation,
   DocStatus,
@@ -130,6 +131,8 @@ interface State {
   // 机器人
   deployBot: (input: { name: string; role: BotRole; model: string; skills: string[] }) => void
   setBotStatus: (botId: string, status: Bot['status']) => void
+  /** 配置岗位说明书 / 提示词 */
+  updateBotCharter: (botId: string, charter: BotCharter) => void
 
   // 产品文档 Wiki
   addDoc: (input: {
@@ -465,6 +468,11 @@ export const useStore = create<State>()(
   setBotStatus: (botId, status) =>
     set((s) => ({
       bots: s.bots.map((b) => (b.id === botId ? { ...b, status } : b)),
+    })),
+
+  updateBotCharter: (botId, charter) =>
+    set((s) => ({
+      bots: s.bots.map((b) => (b.id === botId ? { ...b, charter } : b)),
     })),
 
   addDoc: ({ slug, title, type, productId, productVersion, requirementId, ownerBotId, relations, content }) =>

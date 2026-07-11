@@ -54,7 +54,66 @@ async function importPackage(url: string, projectId: string): Promise<void> {
   toast(`已导入 ${pkg.project.name}：${pkg.products.length} 产品 · ${pkg.docs.length} 文档 · ${pkg.tasks.length} 任务`, 'info')
 }
 
+interface AddonPkg {
+  products: { id: string; name: string; [k: string]: unknown }[]
+  docs: unknown[]
+}
+
+// 增量包：往已存在的项目里追加产品 + 文档（按 sentinel 产品 id 幂等）
+async function importAddon(url: string, sentinelProductId: string): Promise<void> {
+  if (useStore.getState().products.some((p) => p.id === sentinelProductId)) return
+
+  let pkg: AddonPkg
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return
+    pkg = (await res.json()) as AddonPkg
+  } catch {
+    return
+  }
+  const prod = pkg?.products?.find((p) => p.id === sentinelProductId)
+  if (!prod) return
+  if (useStore.getState().products.some((p) => p.id === sentinelProductId)) return
+
+  useStore.setState((s) => ({
+    products: [...s.products, ...(pkg.products as never[])],
+    docs: [...(pkg.docs as never[]), ...s.docs],
+  }))
+  toast(`已导入 ${prod.name}：${pkg.docs.length} 篇接口文档`, 'info')
+}
+
+// 幂等补齐 org-1 的产品经理 / 项目经理机器人（已在用的浏览器 localStorage 里没有）
+function ensureManagers(): void {
+  const wanted = [
+    { id: 'bot-vela', name: 'Vela', role: '产品经理' as const, skills: ['需求分析', 'PRD', '路线图', '用户研究'], completed: 19 },
+    { id: 'bot-polaris', name: 'Polaris', role: '项目经理' as const, skills: ['排期', '风险管理', '跨团队协调', '交付跟踪'], completed: 23 },
+  ]
+  const s = useStore.getState()
+  const missing = wanted.filter((w) => !s.bots.some((b) => b.id === w.id))
+  if (missing.length === 0) return
+  useStore.setState((st) => ({
+    bots: [
+      ...missing.map((w) => ({
+        id: w.id,
+        orgId: 'org-1',
+        name: w.name,
+        role: w.role,
+        model: 'claude-opus-4-8',
+        status: 'idle' as const,
+        currentTaskId: null,
+        skills: w.skills,
+        completed: w.completed,
+        avatarSeed: w.id,
+      })),
+      ...st.bots,
+    ],
+  }))
+}
+
 export async function bootstrapImport(): Promise<void> {
   await importPackage('/plotmax-import.json', 'project-plotmax2')
   await importPackage('/newton-import.json', 'newton')
+  // POS 上游接口（OpenAPI 解析）追加到 newton 项目
+  await importAddon('/newton-pos-api.json', 'nt-pos-api')
+  ensureManagers()
 }

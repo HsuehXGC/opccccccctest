@@ -183,7 +183,28 @@ export interface WikiDoc {
 export type BotStatus = 'idle' | 'working' | 'paused' | 'offline'
 
 /** 机器人角色 / 技能画像 —— 决定它擅长哪类任务 */
-export type BotRole = '全栈工程' | '前端' | '后端' | '数据分析' | '文案运营' | '测试' | '调研'
+export type BotRole =
+  | '产品经理'
+  | '项目经理'
+  | '全栈工程'
+  | '前端'
+  | '后端'
+  | '数据分析'
+  | '文案运营'
+  | '测试'
+  | '调研'
+
+/** 岗位说明书 / 提示词配置 —— 组装成执行时 prepend 到任务 brief 前的 system prompt */
+export interface BotCharter {
+  /** 定位与使命（一段话） */
+  mission: string
+  /** 工作范围职责：能做什么 */
+  canDo: string[]
+  /** 边界：不能做什么 */
+  cannotDo: string[]
+  /** 核心技能 */
+  coreSkills: string[]
+}
 
 export interface Bot {
   id: string
@@ -200,4 +221,6 @@ export interface Bot {
   /** 累计完成任务数 */
   completed: number
   avatarSeed: string
+  /** 岗位说明书 / 提示词配置；未设置时用角色默认模板 */
+  charter?: BotCharter
 }

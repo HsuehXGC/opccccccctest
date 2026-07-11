@@ -5,6 +5,30 @@ const T0 = 1_752_000_000_000
 
 export const seedBots: Bot[] = [
   {
+    id: 'bot-vela',
+    orgId: 'org-1',
+    name: 'Vela',
+    role: '产品经理',
+    model: 'claude-opus-4-8',
+    status: 'idle',
+    currentTaskId: null,
+    skills: ['需求分析', 'PRD', '路线图', '用户研究'],
+    completed: 19,
+    avatarSeed: 'vela',
+  },
+  {
+    id: 'bot-polaris',
+    orgId: 'org-1',
+    name: 'Polaris',
+    role: '项目经理',
+    model: 'claude-opus-4-8',
+    status: 'idle',
+    currentTaskId: null,
+    skills: ['排期', '风险管理', '跨团队协调', '交付跟踪'],
+    completed: 23,
+    avatarSeed: 'polaris',
+  },
+  {
     id: 'bot-atlas',
     orgId: 'org-1',
     name: 'Atlas',
