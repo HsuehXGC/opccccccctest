@@ -188,9 +188,11 @@ app.post('/api/agent/run-stream', requireAuth, (req: AuthedRequest, res) => {
       chunks++
       write({ t: 'chunk', text: e.text })
     } else if (e.type === 'done') {
+      console.log(`✓ run-stream ${jobId} 完成 · ${chunks} chunks · result ${e.result?.length ?? 0} 字 (org=${orgId} exec=${executorId})`)
       write({ t: 'done', result: e.result })
       finish()
     } else if (e.type === 'error') {
+      console.log(`✗ run-stream ${jobId} 报错: ${e.error} (org=${orgId} exec=${executorId})`)
       write({ t: 'error', error: e.error })
       finish()
     }
@@ -204,6 +206,8 @@ app.post('/api/agent/run-stream', requireAuth, (req: AuthedRequest, res) => {
   gateway.on('job', onJob)
   try {
     jobId = gateway.dispatch(executorId, prompt, cwd, planMode ? 'plan' : undefined).jobId
+    const firstLine = String(prompt).split('\n').find((l) => l.trim()) ?? ''
+    console.log(`▶ run-stream ${jobId} 派单 · prompt ${String(prompt).length}字 · ${firstLine.slice(0, 50)} (org=${orgId})`)
   } catch (err) {
     gateway.off('job', onJob)
     write({ t: 'error', error: (err as Error).message })
