@@ -165,3 +165,23 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_org ON jobs(org_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+
+-- 迁移期混合存储：每张领域表存前端完整对象(raw)，保证读回 1:1；
+-- 后端只对少数字段（如 task 状态/产出）做权威写，读取时用列覆盖 raw。
+ALTER TABLE projects     ADD COLUMN IF NOT EXISTS raw jsonb;
+ALTER TABLE products     ADD COLUMN IF NOT EXISTS raw jsonb;
+ALTER TABLE requirements ADD COLUMN IF NOT EXISTS raw jsonb;
+ALTER TABLE docs         ADD COLUMN IF NOT EXISTS raw jsonb;
+ALTER TABLE tasks        ADD COLUMN IF NOT EXISTS raw jsonb;
+ALTER TABLE bots         ADD COLUMN IF NOT EXISTS raw jsonb;
+ALTER TABLE meetings     ADD COLUMN IF NOT EXISTS raw jsonb;
+
+-- 下层表补 org_id，便于按账户组一次性读取
+ALTER TABLE products     ADD COLUMN IF NOT EXISTS org_id text;
+ALTER TABLE requirements ADD COLUMN IF NOT EXISTS org_id text;
+ALTER TABLE docs         ADD COLUMN IF NOT EXISTS org_id text;
+ALTER TABLE tasks        ADD COLUMN IF NOT EXISTS org_id text;
+CREATE INDEX IF NOT EXISTS idx_products_org ON products(org_id);
+CREATE INDEX IF NOT EXISTS idx_req_org ON requirements(org_id);
+CREATE INDEX IF NOT EXISTS idx_docs_org ON docs(org_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_org ON tasks(org_id);

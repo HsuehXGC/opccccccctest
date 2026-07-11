@@ -48,6 +48,16 @@ export const authApi = {
   setMemberDisabled: (token: string, id: string, disabled: boolean) =>
     req<{ user: AuthUser }>(`/org/members/${id}/disabled`, { method: 'POST', body: { disabled }, token }),
 
+  // 云端数据 + 调度
+  stateMeta: (token: string) => req<{ enabled: boolean; hasData: boolean }>('/state/meta', { token }),
+  importSnapshot: (token: string, snapshot: unknown) => req<{ ok: true; counts: Record<string, number> }>('/import', { method: 'POST', body: { snapshot }, token }),
+  getState: (token: string) => req<Record<string, unknown[]>>('/state', { token }),
+  enqueueJobs: (token: string, jobs: unknown[]) => req<{ ok: true; jobs: { id: string; refId: string | null; status: string }[] }>('/jobs', { method: 'POST', body: { jobs }, token }),
+  listJobs: (token: string, opts: { refId?: string; status?: string } = {}) => {
+    const qs = new URLSearchParams(opts as Record<string, string>).toString()
+    return req<{ jobs: CloudJob[] }>(`/jobs${qs ? '?' + qs : ''}`, { token })
+  },
+
   // 本地算力（真实 agent）
   machines: (token: string) => req<{ machines: LiveMachine[] }>('/machines', { token }),
   enrollToken: (token: string) => req<{ token: string; expiresInSec: number }>('/machines/enroll-token', { method: 'POST', token }),
@@ -94,6 +104,20 @@ export async function runExecutorStream(
       }
     }
   }
+}
+
+export interface CloudJob {
+  id: string
+  org_id: string
+  kind: string
+  ref_type: string | null
+  ref_id: string | null
+  title: string
+  status: 'queued' | 'running' | 'done' | 'error' | 'canceled'
+  output: string
+  error: string | null
+  chunks: number
+  created_at: number
 }
 
 export interface LiveExecutor {

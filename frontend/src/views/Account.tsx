@@ -5,6 +5,7 @@ import { useAuth } from '../store/useAuth'
 import { Avatar, cx } from '../lib/ui'
 import { Modal, Field, inputCls } from '../components/Modal'
 import { LocalCompute } from '../components/LocalCompute'
+import { CloudSync } from '../components/CloudSync'
 import { toast } from '../lib/toast'
 
 export function AccountView() {
@@ -208,6 +209,9 @@ export function AccountView() {
           </div>
         )}
       </section>
+
+      {/* 云端数据同步 */}
+      <CloudSync />
 
       {/* 本地算力（真实 agent 接入）*/}
       <LocalCompute />

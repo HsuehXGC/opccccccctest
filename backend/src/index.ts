@@ -8,6 +8,7 @@ import { initStore } from './authStore.ts'
 import { migrate, dbEnabled } from './db.ts'
 import { startScheduler } from './scheduler.ts'
 import { createJob, listJobs, getJob } from './jobStore.ts'
+import { importSnapshot, getOrgState, orgHasData } from './stateStore.ts'
 import {
   changePassword,
   createMember,
@@ -46,7 +47,7 @@ if (dbEnabled) {
 
 const app = express()
 app.use(cors())
-app.use(express.json())
+app.use(express.json({ limit: '32mb' })) // 领域数据快照可达数 MB
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'opc-backend', agents: gateway.listMachines().length })
@@ -282,6 +283,34 @@ app.get('/api/jobs/:id', requireAuth, async (req: AuthedRequest, res) => {
   const job = await getJob(String(req.params.id))
   if (!job || job.org_id !== req.auth!.user.orgId) return res.status(404).json({ error: 'job 不存在' })
   res.json({ job })
+})
+
+// ── 领域数据上云：导入 / 全量读取 ──────────────────────────────
+// 一次性把浏览器 store 快照导入本账户组（幂等）
+app.post('/api/import', requireAuth, async (req: AuthedRequest, res) => {
+  if (!dbEnabled) return res.status(503).json({ error: '云端存储未启用' })
+  try {
+    const result = await importSnapshot(req.auth!.user.orgId, req.body?.snapshot ?? {})
+    res.json({ ok: true, ...result })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+// 读取本账户组全量领域数据（前端 hydrate）
+app.get('/api/state', requireAuth, async (req: AuthedRequest, res) => {
+  if (!dbEnabled) return res.status(503).json({ error: '云端存储未启用' })
+  try {
+    res.json(await getOrgState(req.auth!.user.orgId))
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+// 本账户组云端是否已有数据（前端判断要不要首次同步）
+app.get('/api/state/meta', requireAuth, async (req: AuthedRequest, res) => {
+  if (!dbEnabled) return res.json({ enabled: false, hasData: false })
+  res.json({ enabled: true, hasData: await orgHasData(req.auth!.user.orgId) })
 })
 
 const PORT = Number(process.env.PORT) || 8787

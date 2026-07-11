@@ -5,6 +5,7 @@ import { useAuth } from '../store/useAuth'
 import { authApi, runExecutorStream, type LiveMachine } from '../lib/authApi'
 import { assembleSystemPrompt } from '../lib/botCharter'
 import { assignPrompt, parseAssignments, heuristicAssign } from '../lib/assign'
+import { applyJobsToTasks } from '../lib/cloudJobs'
 import { toast } from '../lib/toast'
 import { Avatar, DOC_TYPE, PriorityBadge, TASK_COLUMNS, cx } from '../lib/ui'
 import type { Task, TaskKind, TaskStatus } from '../types'
@@ -561,84 +562,56 @@ function TaskDrawer({ taskId, onClose }: { taskId: string; onClose: () => void }
   )
 }
 
-// ── 批量执行：把当前视图内「有负责人且未完成」的任务逐个真实派单，产出回填并置完成 ──
+// ── 批量执行：把「有负责人且未完成」的任务入队云端调度，后端常驻执行（关页面不中断）──
 function BatchRun({ tasks }: { tasks: Task[] }) {
   const bots = useStore((s) => s.bots)
-  const recordTaskRun = useStore((s) => s.recordTaskRun)
   const moveTask = useStore((s) => s.moveTask)
-  const setBotStatus = useStore((s) => s.setBotStatus)
   const token = useAuth((s) => s.token)
-  const [running, setRunning] = useState(false)
-  const [prog, setProg] = useState<{ i: number; total: number; title: string } | null>(null)
+  const [busy, setBusy] = useState(false)
 
   // 可执行 = 有负责人、未完成、且还没有真实产出（涵盖待办、卡住的进行中、无产出的待复核）
   const runnable = tasks.filter((t) => t.botId && t.status !== 'done' && !(t.output && t.output.trim()))
 
-  async function pickExec(): Promise<string | null> {
-    if (!token) return null
-    try {
-      const { machines } = await authApi.machines(token)
-      const online = machines.filter((m) => m.online).flatMap((m) => m.executors)
-      return online.find((e) => e.status === 'idle')?.id || online[0]?.id || null
-    } catch {
-      return null
-    }
-  }
-
   async function runAll() {
-    if (running || !token) return
+    if (busy || !token) return
     if (runnable.length === 0) {
       toast('没有可执行的任务（需已指派负责员工且未完成）', 'warn')
       return
     }
-    const exec = await pickExec()
-    if (!exec) {
-      toast('没有在线的本地算力。去「团队与账户 → 本地算力」绑定电脑并保持 agent 运行。', 'warn')
-      return
-    }
-    setRunning(true)
-    let ok = 0
-    let fail = 0
-    for (let i = 0; i < runnable.length; i++) {
-      const t = runnable[i]
-      const bot = bots.find((b) => b.id === t.botId)
-      if (!bot) continue
-      setProg({ i, total: runnable.length, title: t.title })
-      moveTask(t.id, 'in_progress')
-      const prompt = `${assembleSystemPrompt(bot)}\n\n---\n\n# 任务：${t.title}\n\n${t.brief || t.description || '（无简报）'}`
-      let acc = ''
-      try {
-        await runExecutorStream(token, { executorId: exec, prompt }, (e) => {
-          if (e.t === 'chunk') {
-            if (!e.text.startsWith('[agent]')) acc += e.text
-          } else if (e.t === 'done' && e.result) acc = e.result
-          else if (e.t === 'error') acc = (acc + '\n⚠️ ' + e.error).trim()
+    setBusy(true)
+    try {
+      const jobs = runnable
+        .map((t) => {
+          const bot = bots.find((b) => b.id === t.botId)
+          if (!bot) return null
+          return {
+            kind: 'task',
+            refType: 'task',
+            refId: t.id,
+            title: t.title,
+            prompt: `${assembleSystemPrompt(bot)}\n\n---\n\n# 任务：${t.title}\n\n${t.brief || t.description || '（无简报）'}`,
+          }
         })
-        recordTaskRun(t.id, { output: acc, ok: true })
-        moveTask(t.id, 'review')
-        if (t.botId) setBotStatus(t.botId, 'idle')
-        ok++
-      } catch (err) {
-        recordTaskRun(t.id, { output: '', ok: false })
-        moveTask(t.id, 'backlog')
-        if (t.botId) setBotStatus(t.botId, 'idle')
-        fail++
-      }
+        .filter(Boolean)
+      await authApi.enqueueJobs(token, jobs as unknown[])
+      runnable.forEach((t) => moveTask(t.id, 'in_progress'))
+      toast(`已入队 ${jobs.length} 个任务到云端调度，后端执行中——关页面/刷新都不影响，完成后自动进「待复核」`, 'success')
+    } catch (err) {
+      toast('入队失败：' + (err as Error).message, 'warn')
+    } finally {
+      setBusy(false)
     }
-    setProg(null)
-    setRunning(false)
-    toast(`执行完成：${ok} 项已产出，进入「待复核」${fail ? ` · 失败 ${fail}` : ''}`, fail ? 'warn' : 'success')
   }
 
   return (
     <button
       onClick={runAll}
-      disabled={running || runnable.length === 0}
-      title="逐个把有负责人的未完成任务派给其执行器，产出回填交付物并置为完成"
+      disabled={busy || runnable.length === 0}
+      title="把有负责人的未完成任务入队云端调度，由后端常驻执行；关页面/刷新都不中断"
       className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-50"
     >
-      {running ? <Loader2 size={15} className="animate-spin" /> : <Rocket size={15} />}
-      {running && prog ? `执行中 ${prog.i + 1}/${prog.total} · ${prog.title.slice(0, 12)}` : `执行任务${runnable.length ? ` (${runnable.length})` : ''}`}
+      {busy ? <Loader2 size={15} className="animate-spin" /> : <Rocket size={15} />}
+      {busy ? '入队中…' : `执行任务${runnable.length ? ` (${runnable.length})` : ''}`}
     </button>
   )
 }
@@ -754,6 +727,20 @@ export function Kanban() {
       clearFocusTask()
     }
   }, [focusTaskId, clearFocusTask])
+
+  // 云端调度对账：轮询 jobs，把后端跑出的产出回填到本地任务（关页面后重开也能同步）
+  const token = useAuth((s) => s.token)
+  useEffect(() => {
+    if (!token) return
+    let alive = true
+    const poll = () => authApi.listJobs(token, {}).then((r) => alive && applyJobsToTasks(r.jobs)).catch(() => {})
+    poll()
+    const id = setInterval(poll, 5000)
+    return () => {
+      alive = false
+      clearInterval(id)
+    }
+  }, [token])
 
   const products = allProducts.filter((p) => p.projectId === currentProjectId)
   const projectProductIds = useMemo(() => new Set(products.map((p) => p.id)), [products])
