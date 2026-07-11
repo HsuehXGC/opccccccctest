@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { UserPlus, Terminal, FileText, Wrench, Lock, X, GitBranch, Plus, ExternalLink, ClipboardList, Rocket, Loader2, Cpu } from 'lucide-react'
+import { UserPlus, Terminal, FileText, Wrench, Lock, X, GitBranch, Plus, ExternalLink, ClipboardList, Rocket, Loader2, Cpu, Sparkles } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useAuth } from '../store/useAuth'
 import { authApi, runExecutorStream, type LiveMachine } from '../lib/authApi'
 import { assembleSystemPrompt } from '../lib/botCharter'
+import { assignPrompt, parseAssignments, heuristicAssign } from '../lib/assign'
 import { toast } from '../lib/toast'
 import { Avatar, DOC_TYPE, PriorityBadge, TASK_COLUMNS, cx } from '../lib/ui'
 import type { Task, TaskKind, TaskStatus } from '../types'
@@ -638,6 +639,82 @@ function BatchRun({ tasks }: { tasks: Task[] }) {
   )
 }
 
+// ── AI 自动分配负责人：为当前视图内「未指派」的任务按角色匹配虚拟员工 ──
+function AiAssign({ tasks }: { tasks: Task[] }) {
+  const currentOrgId = useStore((s) => s.currentOrgId)
+  const allBots = useStore((s) => s.bots)
+  const assignTask = useStore((s) => s.assignTask)
+  const token = useAuth((s) => s.token)
+  const [busy, setBusy] = useState(false)
+
+  const bots = allBots.filter((b) => b.orgId === currentOrgId && b.status !== 'offline')
+  const unassigned = tasks.filter((t) => !t.botId)
+
+  async function pickExec(): Promise<string | null> {
+    if (!token) return null
+    try {
+      const { machines } = await authApi.machines(token)
+      const online = machines.filter((m) => m.online).flatMap((m) => m.executors)
+      return online.find((e) => e.status === 'idle')?.id || online[0]?.id || null
+    } catch {
+      return null
+    }
+  }
+
+  async function run() {
+    if (busy) return
+    if (unassigned.length === 0) {
+      toast('当前没有未指派的任务', 'warn')
+      return
+    }
+    if (bots.length === 0) {
+      toast('没有可用的虚拟员工', 'warn')
+      return
+    }
+    setBusy(true)
+    try {
+      let assignments: { taskId: string; botId: string }[] = []
+      let aiUsed = false
+      const exec = token ? await pickExec() : null
+      if (exec && token) {
+        const prompt = assignPrompt(unassigned, bots)
+        let acc = ''
+        try {
+          await runExecutorStream(token, { executorId: exec, prompt, planMode: true }, (e) => {
+            if (e.t === 'chunk') {
+              if (!e.text.startsWith('[agent]')) acc += e.text
+            } else if (e.t === 'done' && e.result) acc = e.result
+          })
+          assignments = parseAssignments(acc, unassigned, bots)
+          aiUsed = assignments.length > 0
+        } catch {
+          /* 落到启发式 */
+        }
+      }
+      // AI 未覆盖的任务用启发式兜底
+      const covered = new Set(assignments.map((a) => a.taskId))
+      const rest = unassigned.filter((t) => !covered.has(t.id))
+      if (rest.length) assignments = assignments.concat(heuristicAssign(rest, bots))
+      assignments.forEach((a) => assignTask(a.taskId, a.botId))
+      toast(`已${aiUsed ? 'AI' : '启发式'}分配 ${assignments.length} 个任务的负责人`, 'success')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button
+      onClick={run}
+      disabled={busy || unassigned.length === 0}
+      title="为未指派的任务按角色/技能自动匹配负责员工（AI 优先，离线回退启发式）"
+      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-brand/40 bg-white px-3.5 py-2 text-sm font-medium text-brand transition hover:bg-brand-soft disabled:opacity-50"
+    >
+      {busy ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+      {busy ? 'AI 分配中…' : `AI 分配${unassigned.length ? ` (${unassigned.length})` : ''}`}
+    </button>
+  )
+}
+
 export function Kanban() {
   const allProducts = useStore((s) => s.products)
   const currentProjectId = useStore((s) => s.currentProjectId)
@@ -685,6 +762,7 @@ export function Kanban() {
               </option>
             ))}
           </select>
+          <AiAssign tasks={filtered} />
           <BatchRun tasks={filtered} />
         </div>
       </header>
