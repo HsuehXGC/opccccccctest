@@ -1,5 +1,7 @@
 // ── 鉴权 API 客户端 ───────────────────────────────────────
-// 前端跑在 5173，后端 auth 在 8787。可用 VITE_API_URL 覆盖。
+// 生产：同源相对路径 /api（navo7.com 由 nginx 把 /api 代理到后端），前后端同域。
+// 开发：vite 跑在 5173，后端在 8787，直连 localhost:8787。
+// 可用 VITE_API_URL 显式覆盖。
 
 export interface AuthUser {
   id: string
@@ -13,7 +15,8 @@ export interface AuthUser {
   disabled?: boolean
 }
 
-const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8787/api'
+const BASE =
+  (import.meta.env.VITE_API_URL as string | undefined) ?? (import.meta.env.DEV ? 'http://localhost:8787/api' : '/api')
 
 async function req<T>(path: string, opts: { method?: string; body?: unknown; token?: string | null } = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
