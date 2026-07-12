@@ -725,6 +725,80 @@ function ShellJobButton({ mode }: { mode: 'build' | 'test' }) {
   )
 }
 
+// ── 集成：把「完成」任务的 opc/<taskId> 分支合并成 opc/integration（shell job，G2.3）──
+function IntegrateButton({ tasks }: { tasks: Task[] }) {
+  const currentProjectId = useStore((s) => s.currentProjectId)
+  const project = useStore((s) => s.projects.find((p) => p.id === currentProjectId))
+  const token = useAuth((s) => s.token)
+  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const ws = project?.workspace
+  // 本项目已完成、且是在真实 repo 里执行过的任务（产出里带 git 变更 → 有分支）
+  const doneCode = tasks.filter((t) => t.status === 'done' && t.output && /GIT 变更|新提交/.test(t.output))
+  if (!ws?.repoPath || doneCode.length === 0) return null
+
+  async function run() {
+    if (!token || !ws || status === 'running') return
+    setStatus('running')
+    const refId = `integrate:${currentProjectId}`
+    const base = ws.branch || 'main'
+    const branches = doneCode.map((t) => `opc/${t.id}`).join(' ')
+    const script = [
+      ws.env || '',
+      `set +e`,
+      `git checkout "${base}" || { echo "无法切到 ${base}（工作区可能有未提交改动）"; exit 1; }`,
+      `git branch -D opc/integration 2>/dev/null`,
+      `git checkout -b opc/integration || exit 1`,
+      `MERGED=""; CONFLICTS=""`,
+      `for b in ${branches}; do`,
+      `  git rev-parse --verify "$b" >/dev/null 2>&1 || continue`,
+      `  if git merge --no-edit "$b" >/dev/null 2>&1; then MERGED="$MERGED $b"; else git merge --abort; CONFLICTS="$CONFLICTS $b"; fi`,
+      `done`,
+      `echo "集成分支 opc/integration 就绪（base=${base}）"`,
+      `echo "已合并:$MERGED"`,
+      `[ -n "$CONFLICTS" ] && echo "⚠️ 冲突已跳过:$CONFLICTS" || echo "无冲突"`,
+    ]
+      .filter(Boolean)
+      .join('\n')
+    try {
+      await authApi.enqueueJobs(token, [{ kind: 'integrate', refType: 'integrate', refId, title: `集成 ${project?.name ?? ''}`, prompt: script, cwd: ws.repoPath, targetMachine: ws.machine ?? null }])
+      toast(`集成 ${doneCode.length} 个已完成任务的分支中…`, 'success')
+      for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 5000))
+        const { jobs } = await authApi.listJobs(token, { refId })
+        const j = jobs[0]
+        if (!j) continue
+        if (j.status === 'done') {
+          setStatus('done')
+          const conflict = /冲突已跳过:\s*\S/.test(j.output)
+          toast(conflict ? '⚠️ 集成完成，但有分支冲突（已跳过），需人工处理' : '✅ 集成成功，opc/integration 就绪', conflict ? 'warn' : 'success')
+          return
+        }
+        if (j.status === 'error') {
+          setStatus('error')
+          toast('❌ 集成失败：' + (j.error || '').slice(0, 140), 'warn')
+          return
+        }
+      }
+      setStatus('idle')
+    } catch (err) {
+      setStatus('error')
+      toast('集成入队失败：' + (err as Error).message, 'warn')
+    }
+  }
+
+  const label = status === 'running' ? '集成中…' : status === 'done' ? '✅ 已集成' : status === 'error' ? '❌ 集成失败' : `集成 (${doneCode.length})`
+  return (
+    <button
+      onClick={run}
+      disabled={status === 'running'}
+      title="把已完成任务的 opc/<taskId> 分支合并成 opc/integration"
+      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
+    >
+      {status === 'running' ? <Loader2 size={15} className="animate-spin" /> : <GitBranch size={15} />} {label}
+    </button>
+  )
+}
+
 // ── AI 复核（QA 门禁）：让 QA bot 判定待复核任务是否达标，PASS 自动通过 ──
 function AiReview({ tasks }: { tasks: Task[] }) {
   const currentOrgId = useStore((s) => s.currentOrgId)
@@ -934,6 +1008,7 @@ export function Kanban() {
           <BatchRun tasks={filtered} />
           <AiReview tasks={filtered} />
           <ReviewApprove tasks={filtered} />
+          <IntegrateButton tasks={filtered} />
           <ShellJobButton mode="build" />
           <ShellJobButton mode="test" />
         </div>
