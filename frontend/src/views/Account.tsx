@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { UserPlus, FolderPlus, Check, Crown, ShieldPlus, LogOut, AlertCircle, KeyRound, Ban, Power } from 'lucide-react'
+import { UserPlus, FolderPlus, Check, Crown, ShieldPlus, LogOut, AlertCircle, KeyRound, Ban, Power, GitBranch } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useAuth } from '../store/useAuth'
 import { Avatar, cx } from '../lib/ui'
@@ -47,6 +47,7 @@ export function AccountView() {
   const [addingProject, setAddingProject] = useState(false)
   const [pName, setPName] = useState('')
   const [pDesc, setPDesc] = useState('')
+  const [wsProjectId, setWsProjectId] = useState<string | null>(null)
 
   const [changingPw, setChangingPw] = useState(false)
   const [curPw, setCurPw] = useState('')
@@ -190,18 +191,33 @@ export function AccountView() {
                   <div className="mb-1 flex items-center gap-2">
                     <span className="font-semibold">{p.name}</span>
                     {active && <span className="rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-medium text-brand">当前</span>}
+                    {p.workspace?.repoPath ? (
+                      <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700" title={p.workspace.repoPath}>
+                        <GitBranch size={10} /> 已接工作区
+                      </span>
+                    ) : (
+                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">纯规划</span>
+                    )}
                   </div>
                   <p className="mb-3 line-clamp-2 text-xs text-slate-500">{p.description}</p>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-slate-400">{count} 个产品</span>
-                    {!active && (
+                    <div className="flex items-center gap-1.5">
                       <button
-                        onClick={() => switchProject(p.id)}
-                        className="rounded-lg px-2.5 py-1 text-xs font-medium text-brand ring-1 ring-brand/30 hover:bg-brand-soft"
+                        onClick={() => setWsProjectId(p.id)}
+                        className="rounded-lg px-2.5 py-1 text-xs font-medium text-slate-500 ring-1 ring-slate-200 hover:bg-slate-50"
                       >
-                        切到此项目
+                        工作区
                       </button>
-                    )}
+                      {!active && (
+                        <button
+                          onClick={() => switchProject(p.id)}
+                          className="rounded-lg px-2.5 py-1 text-xs font-medium text-brand ring-1 ring-brand/30 hover:bg-brand-soft"
+                        >
+                          切到此项目
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               )
@@ -209,6 +225,8 @@ export function AccountView() {
           </div>
         )}
       </section>
+
+      {wsProjectId && <WorkspaceModal projectId={wsProjectId} onClose={() => setWsProjectId(null)} />}
 
       {/* 云端数据同步 */}
       <CloudSync />
@@ -381,5 +399,68 @@ export function AccountView() {
         </Modal>
       )}
     </div>
+  )
+}
+
+// ── 项目工作区配置（Gap 0：接入真实 repo + 构建/测试/运行命令）──────────
+function WorkspaceModal({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+  const project = useStore((s) => s.projects.find((p) => p.id === projectId))
+  const setProjectWorkspace = useStore((s) => s.setProjectWorkspace)
+  const ws = project?.workspace
+  const [repoPath, setRepoPath] = useState(ws?.repoPath ?? '')
+  const [branch, setBranch] = useState(ws?.branch ?? 'main')
+  const [buildCmd, setBuildCmd] = useState(ws?.buildCmd ?? '')
+  const [testCmd, setTestCmd] = useState(ws?.testCmd ?? '')
+  const [runCmd, setRunCmd] = useState(ws?.runCmd ?? '')
+  const [env, setEnv] = useState(ws?.env ?? '')
+
+  const fillVioraAI = () => {
+    setRepoPath('/Users/hsueh/VioraAI V3 Demo')
+    setBranch('main')
+    setBuildCmd('mvn -q -DskipTests package')
+    setTestCmd('mvn -q test')
+    setRunCmd('java -jar target/viora-demo-1.20.0-DEMO.jar')
+    setEnv('JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home PATH=$JAVA_HOME/bin:$PATH')
+  }
+
+  function save() {
+    if (!repoPath.trim()) {
+      setProjectWorkspace(projectId, undefined)
+    } else {
+      setProjectWorkspace(projectId, { repoPath: repoPath.trim(), branch: branch.trim() || 'main', buildCmd: buildCmd.trim(), testCmd: testCmd.trim(), runCmd: runCmd.trim(), env: env.trim() || undefined })
+    }
+    toast('工作区已保存', 'success')
+    onClose()
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`工作区 · ${project?.name ?? ''}`}>
+      <div className="mb-3 flex items-center justify-between rounded-lg bg-brand-soft/50 px-3 py-2 text-[11px] text-slate-500">
+        接入真实代码仓库后，任务会由执行器在这个 repo 里真改代码、构建、测试、发版。
+        <button onClick={fillVioraAI} className="shrink-0 rounded px-2 py-0.5 text-[11px] font-medium text-brand ring-1 ring-brand/30 hover:bg-brand-soft">填 VioraAI 预设</button>
+      </div>
+      <Field label="Repo 路径（执行器本地绝对路径）">
+        <input className={inputCls} value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="/Users/hsueh/VioraAI V3 Demo" autoFocus />
+      </Field>
+      <Field label="默认分支">
+        <input className={inputCls} value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />
+      </Field>
+      <Field label="构建命令">
+        <input className={inputCls} value={buildCmd} onChange={(e) => setBuildCmd(e.target.value)} placeholder="mvn -q -DskipTests package" />
+      </Field>
+      <Field label="测试命令">
+        <input className={inputCls} value={testCmd} onChange={(e) => setTestCmd(e.target.value)} placeholder="mvn -q test" />
+      </Field>
+      <Field label="运行/预览命令">
+        <input className={inputCls} value={runCmd} onChange={(e) => setRunCmd(e.target.value)} placeholder="java -jar target/xxx.jar" />
+      </Field>
+      <Field label="环境变量前缀（可选，执行命令时带上）">
+        <input className={inputCls} value={env} onChange={(e) => setEnv(e.target.value)} placeholder="JAVA_HOME=... PATH=$JAVA_HOME/bin:$PATH" />
+      </Field>
+      <div className="mt-4 flex justify-end gap-2">
+        <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100">取消</button>
+        <button onClick={save} className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">保存工作区</button>
+      </div>
+    </Modal>
   )
 }

@@ -17,6 +17,7 @@ import type {
   Priority,
   Product,
   Project,
+  ProjectWorkspace,
   RelType,
   Requirement,
   Task,
@@ -77,6 +78,8 @@ interface State {
   hydrateFromCloud: (orgId: string, payload: Partial<Record<'projects' | 'products' | 'requirements' | 'docs' | 'tasks' | 'bots' | 'meetings', unknown[]>>) => void
   switchProject: (projectId: string) => void
   addProject: (input: { name: string; description: string }) => void
+  /** 配置/更新项目的真实工作区（Gap 0） */
+  setProjectWorkspace: (projectId: string, workspace: ProjectWorkspace | undefined) => void
   addProduct: (input: { name: string; description: string; currentVersion: string }) => string
   /** 「绑定电脑」：一台 agent 接入，登记机器并探测出默认执行器 */
   enrollMachine: (input: { name: string; os: string }) => void
@@ -280,6 +283,8 @@ export const useStore = create<State>()(
         currentProjectId: id,
       }
     }),
+  setProjectWorkspace: (projectId, workspace) =>
+    set((s) => ({ projects: s.projects.map((p) => (p.id === projectId ? { ...p, workspace } : p)) })),
 
   view: 'dashboard',
   setView: (view) => set({ view }),

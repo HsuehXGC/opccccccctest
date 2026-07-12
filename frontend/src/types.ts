@@ -23,11 +23,29 @@ export interface Account {
 
 // ── 项目 ──────────────────────────────────────────────────
 // 账户组共享的顶层工作区。一个项目含多个产品及其全套内容。
+/** 真实工作区：项目对应的代码仓库 + 构建/测试/运行命令（Gap 0 执行器据此在真实 repo 里干活） */
+export interface ProjectWorkspace {
+  /** 执行器上的本地 repo 路径（作为任务 cwd） */
+  repoPath: string
+  /** 默认分支 */
+  branch: string
+  /** 构建命令（如 mvn -DskipTests package） */
+  buildCmd: string
+  /** 测试命令（如 mvn test） */
+  testCmd: string
+  /** 运行/预览命令（如 java -jar target/xxx.jar） */
+  runCmd: string
+  /** 环境变量前缀（如 JAVA_HOME=... PATH=...），执行命令时带上 */
+  env?: string
+}
+
 export interface Project {
   id: string
   orgId: string
   name: string
   description: string
+  /** 接入的真实工作区（未配置则该项目仍是纯规划态） */
+  workspace?: ProjectWorkspace
   createdAt: number
 }
 
