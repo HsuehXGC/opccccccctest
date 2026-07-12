@@ -6,6 +6,7 @@ import { Avatar, cx } from '../lib/ui'
 import { Modal, Field, inputCls } from '../components/Modal'
 import { LocalCompute } from '../components/LocalCompute'
 import { CloudSync } from '../components/CloudSync'
+import { ProvisionModal } from '../components/ProvisionModal'
 import { toast } from '../lib/toast'
 
 export function AccountView() {
@@ -48,6 +49,7 @@ export function AccountView() {
   const [pName, setPName] = useState('')
   const [pDesc, setPDesc] = useState('')
   const [wsProjectId, setWsProjectId] = useState<string | null>(null)
+  const [provProjectId, setProvProjectId] = useState<string | null>(null)
 
   const [changingPw, setChangingPw] = useState(false)
   const [curPw, setCurPw] = useState('')
@@ -203,6 +205,14 @@ export function AccountView() {
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-slate-400">{count} 个产品</span>
                     <div className="flex items-center gap-1.5">
+                      {!p.workspace?.repoPath && (
+                        <button
+                          onClick={() => setProvProjectId(p.id)}
+                          className="rounded-lg px-2.5 py-1 text-xs font-medium text-brand ring-1 ring-brand/30 hover:bg-brand-soft"
+                        >
+                          AI 新建代码
+                        </button>
+                      )}
                       <button
                         onClick={() => setWsProjectId(p.id)}
                         className="rounded-lg px-2.5 py-1 text-xs font-medium text-slate-500 ring-1 ring-slate-200 hover:bg-slate-50"
@@ -227,6 +237,13 @@ export function AccountView() {
       </section>
 
       {wsProjectId && <WorkspaceModal projectId={wsProjectId} onClose={() => setWsProjectId(null)} />}
+      {provProjectId && (
+        <ProvisionModal
+          projectId={provProjectId}
+          projectName={projects.find((p) => p.id === provProjectId)?.name ?? '项目'}
+          onClose={() => setProvProjectId(null)}
+        />
+      )}
 
       {/* 云端数据同步 */}
       <CloudSync />

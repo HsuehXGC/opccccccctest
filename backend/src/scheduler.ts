@@ -103,8 +103,8 @@ function startJob(job: Job, executorId: string): void {
   inc(executorId)
   gateway.on('job', onJob)
   try {
-    // 构建/测试/集成/发布 job = shell 任务：prompt 即 shell 命令，走 cmd 通道（不跑 claude）
-    const isShell = ['build', 'test', 'integrate', 'release'].includes(job.kind)
+    // 构建/测试/集成/发布/新建仓库 job = shell 任务：prompt 即 shell 命令，走 cmd 通道（不跑 claude）
+    const isShell = ['build', 'test', 'integrate', 'release', 'provision'].includes(job.kind)
     remoteJobId = isShell
       ? gateway.dispatch(executorId, '', job.cwd ?? undefined, undefined, job.prompt).jobId
       : gateway.dispatch(executorId, job.prompt, job.cwd ?? undefined, job.mode === 'plan' ? 'plan' : undefined).jobId

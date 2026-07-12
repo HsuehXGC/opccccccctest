@@ -86,3 +86,14 @@
 先把 **Gap 0 全打通**（能真改代码），再 **Gap 2 最小版**（能出测试版本），
 再 **Gap 1**（自驾循环串起来），再 **Gap 3**（发布级评审闭环），Gap 4 贯穿加固。
 每完成一项，用 VioraAI 加一个小 feature 验证 OPC 是否真的产出了生产力。
+
+---
+
+## 追加：AI 新建代码项目（远程脚手架）
+
+给新项目一键在执行器机器上「git init 新仓库 + 脚手架初始代码 + 自动填工作区」——不碰 GitHub、不用本地操作。
+- 后端：`provision` 加入 shell job 集合
+- 前端 `ProvisionModal`（Account 项目卡「AI 新建代码」按钮，仅无工作区的项目显示）：
+  选执行机器 + 技术栈 + 描述 → ① provision job 建目录 git init 取路径 → ② claude 脚手架
+  最小可运行骨架并提交、输出 build/test/run/env → ③ setProjectWorkspace 自动接好
+- 实测：为「HAVC 定制公司官网」脚手架出真实静态官网（含简介/服务/联系），git 提交，命令齐 ✅
