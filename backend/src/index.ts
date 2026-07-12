@@ -11,7 +11,7 @@ import { createJob, listJobs, getJob, activeRefIds } from './jobStore.ts'
 import { importSnapshot, getOrgState, orgHasData } from './stateStore.ts'
 import { orchestrateMeeting, getMeeting, isMeetingRunning, orgHasExecutor, recoverMeetings, type MeetingRunPayload } from './meetingRunner.ts'
 import { addBusConn, notifyOrg } from './bus.ts'
-import { runIteration, getIteration, isProjectRunning } from './autopilot.ts'
+import { runIteration, getIteration, isProjectRunning, reviewIteration } from './autopilot.ts'
 import {
   changePassword,
   createMember,
@@ -366,6 +366,16 @@ app.get('/api/autopilot/:projectId', requireAuth, async (req: AuthedRequest, res
   if (!dbEnabled) return res.json({ iteration: null, running: false })
   const iteration = await getIteration(req.auth!.user.orgId, String(req.params.projectId))
   res.json({ iteration, running: isProjectRunning(String(req.params.projectId)) })
+})
+
+// 对当前 awaiting_review 的迭代给评审结论：approve 收尾 / iterate 据反馈跑下一轮
+app.post('/api/autopilot/:projectId/review', requireAuth, async (req: AuthedRequest, res) => {
+  if (!dbEnabled) return res.status(503).json({ error: '云端未启用' })
+  const { action, feedback, goal } = req.body ?? {}
+  if (action !== 'approve' && action !== 'iterate') return res.status(400).json({ error: 'action 须为 approve 或 iterate' })
+  const r = await reviewIteration(req.auth!.user.orgId, String(req.params.projectId), action, String(feedback ?? ''), goal ? String(goal) : undefined)
+  if (!r.ok) return res.status(400).json({ error: r.error })
+  res.json({ ok: true })
 })
 
 const PORT = Number(process.env.PORT) || 8787

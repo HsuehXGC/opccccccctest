@@ -57,6 +57,7 @@ export const authApi = {
   getMeeting: (token: string, meetingId: string) => req<{ meeting: Record<string, unknown>; running: boolean }>(`/meetings/${meetingId}`, { token }),
   runAutopilot: (token: string, body: { projectId: string; goal: string; feedback?: string }) => req<{ ok: true }>('/autopilot/run', { method: 'POST', body, token }),
   getAutopilot: (token: string, projectId: string) => req<{ iteration: Iteration | null; running: boolean }>(`/autopilot/${projectId}`, { token }),
+  reviewAutopilot: (token: string, projectId: string, body: { action: 'approve' | 'iterate'; feedback?: string; goal?: string }) => req<{ ok: true }>(`/autopilot/${projectId}/review`, { method: 'POST', body, token }),
   listJobs: (token: string, opts: { refId?: string; refType?: string; status?: string } = {}) => {
     const qs = new URLSearchParams(opts as Record<string, string>).toString()
     return req<{ jobs: CloudJob[] }>(`/jobs${qs ? '?' + qs : ''}`, { token })

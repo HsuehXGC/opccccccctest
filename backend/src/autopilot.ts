@@ -154,6 +154,24 @@ export async function getIteration(orgId: string, projectId: string): Promise<an
 }
 export const isProjectRunning = (projectId: string) => running.has(projectId)
 
+// ── 人工评审：对 awaiting_review 的迭代给结论 ─────────────────
+// approve = 通过发布，本轮收尾；iterate = 据反馈自动跑下一轮（反馈进规划）
+export async function reviewIteration(
+  orgId: string,
+  projectId: string,
+  action: 'approve' | 'iterate',
+  feedback: string,
+  goal?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const it = await getIteration(orgId, projectId)
+  if (!it || it.status !== 'awaiting_review') return { ok: false, error: '当前没有待评审的迭代' }
+  await q(`UPDATE iterations SET status='done', feedback=$2, updated_at=$3 WHERE id=$1`, [it.id, feedback || it.feedback || '', now()])
+  notifyOrg(orgId, 'state')
+  if (action === 'approve') return { ok: true }
+  // iterate：带反馈开下一轮（沿用原目标或换新目标）
+  return runIteration(orgId, projectId, (goal && goal.trim()) || it.goal, feedback || '')
+}
+
 // ── 主循环：跑一轮迭代 ───────────────────────────────────────
 export async function runIteration(orgId: string, projectId: string, goal: string, feedback: string): Promise<{ ok: boolean; error?: string }> {
   if (running.has(projectId)) return { ok: false, error: '该项目已有迭代在进行' }
