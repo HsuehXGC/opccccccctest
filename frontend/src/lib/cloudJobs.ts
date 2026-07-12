@@ -2,10 +2,31 @@ import { useStore } from '../store/useStore'
 import type { DocType } from '../types'
 import type { CloudJob } from './authApi'
 
-// 把云端 job 的结果回填到本地（任务 + 文档），关页面重开、执行中轮询都用它对账
+/** 解析 QA 判定：VERDICT: PASS / FAIL（拿不到判定返回 null → 交人工） */
+export function parseQaVerdict(output: string): 'pass' | 'fail' | null {
+  if (/VERDICT:\s*PASS/i.test(output)) return 'pass'
+  if (/VERDICT:\s*FAIL/i.test(output)) return 'fail'
+  return null
+}
+
+// QA 门禁 job 完成 → PASS 自动通过为完成；FAIL/不确定留在待复核交人工
+function applyQaJobs(jobs: CloudJob[]): void {
+  const st = useStore.getState()
+  for (const j of jobs) {
+    if (j.status !== 'done' || !j.ref_id) continue
+    const taskId = j.ref_id.replace(/^qa:/, '')
+    const t = st.tasks.find((x) => x.id === taskId)
+    if (!t || t.status !== 'review') continue
+    if (parseQaVerdict(j.output || '') === 'pass') st.moveTask(taskId, 'done')
+    // FAIL / 不确定：留在待复核，交人工
+  }
+}
+
+// 把云端 job 的结果回填到本地（任务 + 文档 + QA），关页面重开、执行中轮询都用它对账
 export function applyJobs(jobs: CloudJob[]): void {
   applyJobsToTasks(jobs.filter((j) => j.ref_type === 'task'))
   applyDocJobs(jobs.filter((j) => j.ref_type === 'doc'))
+  applyQaJobs(jobs.filter((j) => j.ref_type === 'qa'))
   // 记录仍在「排队中/运行中」的 refId，供 UI 排除、避免重复入队
   const active = jobs.filter((j) => (j.status === 'queued' || j.status === 'running') && j.ref_id).map((j) => j.ref_id as string)
   useStore.getState().setActiveJobRefs([...new Set(active)])

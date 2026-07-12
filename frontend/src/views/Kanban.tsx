@@ -665,65 +665,124 @@ function BatchRun({ tasks }: { tasks: Task[] }) {
   )
 }
 
-// ── 构建测试版本：在工作区跑 build 命令（shell job，G2.1）──
-function BuildButton() {
+// ── 在工作区跑构建/测试（shell job，G2.1/G2.2）──
+function ShellJobButton({ mode }: { mode: 'build' | 'test' }) {
   const currentProjectId = useStore((s) => s.currentProjectId)
   const project = useStore((s) => s.projects.find((p) => p.id === currentProjectId))
   const token = useAuth((s) => s.token)
   const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
   const ws = project?.workspace
-  if (!ws?.repoPath || !ws.buildCmd) return null
+  const cmd = mode === 'build' ? ws?.buildCmd : ws?.testCmd
+  if (!ws?.repoPath || !cmd) return null
+  const noun = mode === 'build' ? '构建' : '测试'
 
-  async function build() {
+  async function run() {
     if (!token || !ws || status === 'running') return
     setStatus('running')
-    const refId = `build:${currentProjectId}`
+    const refId = `${mode}:${currentProjectId}`
     try {
       await authApi.enqueueJobs(token, [
-        {
-          kind: 'build',
-          refType: 'build',
-          refId,
-          title: `构建 ${project?.name ?? ''}`,
-          prompt: `${ws.env ? ws.env + '\n' : ''}${ws.buildCmd}`,
-          cwd: ws.repoPath,
-          targetMachine: ws.machine ?? null,
-        },
+        { kind: mode, refType: mode, refId, title: `${noun} ${project?.name ?? ''}`, prompt: `${ws.env ? ws.env + '\n' : ''}${cmd}`, cwd: ws.repoPath, targetMachine: ws.machine ?? null },
       ])
-      toast('构建已入队，在工作区执行中…', 'success')
-      // 轮询该 build job
-      for (let i = 0; i < 60; i++) {
+      toast(`${noun}已入队，在工作区执行中…`, 'success')
+      for (let i = 0; i < 90; i++) {
         await new Promise((r) => setTimeout(r, 5000))
         const { jobs } = await authApi.listJobs(token, { refId })
         const j = jobs[0]
         if (!j) continue
         if (j.status === 'done') {
           setStatus('done')
-          toast('✅ 构建成功', 'success')
+          toast(`✅ ${noun}${mode === 'test' ? '通过' : '成功'}`, 'success')
           return
         }
         if (j.status === 'error') {
           setStatus('error')
-          toast('❌ 构建失败：' + (j.error || '').slice(0, 120), 'warn')
+          toast(`❌ ${noun}${mode === 'test' ? '未通过' : '失败'}：` + (j.error || '').slice(0, 140), 'warn')
           return
         }
       }
       setStatus('idle')
     } catch (err) {
       setStatus('error')
-      toast('构建入队失败：' + (err as Error).message, 'warn')
+      toast(`${noun}入队失败：` + (err as Error).message, 'warn')
     }
   }
 
-  const label = status === 'running' ? '构建中…' : status === 'done' ? '✅ 构建成功' : status === 'error' ? '❌ 构建失败' : '构建测试版本'
+  const doing = mode === 'build' ? '构建中…' : '测试中…'
+  const ok = mode === 'build' ? '✅ 构建成功' : '✅ 测试通过'
+  const bad = mode === 'build' ? '❌ 构建失败' : '❌ 测试未过'
+  const idle = mode === 'build' ? '构建测试版本' : '跑测试'
+  const label = status === 'running' ? doing : status === 'done' ? ok : status === 'error' ? bad : idle
   return (
     <button
-      onClick={build}
+      onClick={run}
       disabled={status === 'running'}
-      title={`在工作区跑：${ws.buildCmd}`}
+      title={`在工作区跑：${cmd}`}
       className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
     >
       {status === 'running' ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} {label}
+    </button>
+  )
+}
+
+// ── AI 复核（QA 门禁）：让 QA bot 判定待复核任务是否达标，PASS 自动通过 ──
+function AiReview({ tasks }: { tasks: Task[] }) {
+  const currentOrgId = useStore((s) => s.currentOrgId)
+  const allBots = useStore((s) => s.bots)
+  const token = useAuth((s) => s.token)
+  const [busy, setBusy] = useState(false)
+
+  const reviewable = tasks.filter((t) => t.status === 'review' && t.output && t.output.trim())
+  if (reviewable.length === 0) return null
+  const qaBot =
+    allBots.find((b) => b.orgId === currentOrgId && b.role === '测试') ||
+    allBots.find((b) => b.orgId === currentOrgId && b.role === '产品经理') ||
+    allBots.find((b) => b.orgId === currentOrgId)
+
+  async function run() {
+    if (!token || busy || !qaBot) return
+    setBusy(true)
+    try {
+      const jobs = reviewable.map((t) => ({
+        kind: 'qa',
+        refType: 'qa',
+        refId: `qa:${t.id}`,
+        title: `QA 复核：${t.title}`,
+        prompt: [
+          assembleSystemPrompt(qaBot),
+          '',
+          '---',
+          '',
+          '你是本次的质量把关人。判断下面这个已完成任务的**执行结果**是否真正满足**任务要求**。',
+          '',
+          `# 任务：${t.title}`,
+          t.brief || t.description || '（无简报）',
+          '',
+          '# 执行结果（含代码改动摘要）',
+          (t.output || '').slice(0, 6000),
+          '',
+          '# 你的判定',
+          '第一行必须严格是：`VERDICT: PASS` 或 `VERDICT: FAIL`（二选一）。',
+          '随后 1–2 句理由：满足在哪 / 不满足在哪、缺什么。宁严勿松——不确定就 FAIL。',
+        ].join('\n'),
+      }))
+      await authApi.enqueueJobs(token, jobs)
+      toast(`已派 QA 复核 ${jobs.length} 项，通过的会自动进「完成」，不过的留在待复核`, 'success')
+    } catch (err) {
+      toast('AI 复核入队失败：' + (err as Error).message, 'warn')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button
+      onClick={run}
+      disabled={busy || !qaBot}
+      title="让 QA 机器人对照任务要求逐个判定；通过自动完成，不过留待人工"
+      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-violet-300 bg-white px-3.5 py-2 text-sm font-medium text-violet-700 transition hover:bg-violet-50 disabled:opacity-50"
+    >
+      {busy ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />} AI 复核 ({reviewable.length})
     </button>
   )
 }
@@ -873,8 +932,10 @@ export function Kanban() {
           </select>
           <AiAssign tasks={filtered} />
           <BatchRun tasks={filtered} />
+          <AiReview tasks={filtered} />
           <ReviewApprove tasks={filtered} />
-          <BuildButton />
+          <ShellJobButton mode="build" />
+          <ShellJobButton mode="test" />
         </div>
       </header>
 
