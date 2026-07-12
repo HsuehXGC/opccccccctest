@@ -15,8 +15,8 @@
 
 | # | 项 | 说明 | 状态 |
 |---|----|------|------|
-| G0.0 | 执行器环境就绪 | 本机装 Java17 + Maven（有）+ 认证 claude 无头可用 + 能 `mvn package` | 🔵 |
-| G0.1 | 项目接入真实工作区 | Project 增加 workspace：repo 路径、默认分支、build/test/run 命令；模型+UI | 🔲 |
+| G0.0 | 执行器环境就绪 | 本机 Java17 ✅ + Maven ✅ + VioraAI 编译通过 ✅；**claude 无头认证待你做（401）** | ⛔ 等 claude 认证 |
+| G0.1 | 项目接入真实工作区 | Project.workspace（repo/分支/build/test/run/env）+ Account 配置弹窗 + VioraAI 预设 | ✅ |
 | G0.2 | 任务派单带 cwd（工作区） | 派任务时把 workspace 作 cwd 传执行器，claude 在真实 repo 里改文件 | 🔲 |
 | G0.3 | 代码任务产出=git 提交 | 捕获 git diff / 新 commit / 改动文件；任务详情看 diff（不再只存文本） | 🔲 |
 | G0.4 | 任务隔离（分支/worktree） | 每任务独立分支或 worktree 执行，互不污染，失败可丢弃 | 🔲 |
