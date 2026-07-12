@@ -7,6 +7,7 @@ export const MEETING_KIND: Record<MeetingKind, { label: string; hint: string }> 
   change: { label: '需求变更', hint: '对已有项目的需求变更做评估、影响分析与重排计划' },
   standup: { label: '例会同步', hint: '同步进展、对齐优先级、暴露阻塞与风险' },
   docgen: { label: '文档撰写', hint: '基于已完成任务的产出，商定要写哪些项目文档、各自负责，随后逐篇撰写正式文档' },
+  review: { label: '发布评审', hint: '自驾发布测试版后，团队对照 PRD 评估交付、给出下一轮建议（由 OPC 自动发起）' },
 }
 
 const REQ_STATUS: Record<string, string> = { draft: '草稿', planning: '规划中', active: '进行中', done: '已完成' }

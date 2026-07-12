@@ -16,6 +16,7 @@ const KIND_CLS: Record<MeetingKind, string> = {
   change: 'bg-amber-100 text-amber-700',
   standup: 'bg-slate-100 text-slate-600',
   docgen: 'bg-emerald-100 text-emerald-700',
+  review: 'bg-brand-soft text-brand',
 }
 
 // ── 发起会议 ─────────────────────────────────────────────
@@ -61,7 +62,7 @@ function CreateMeeting({ orgBots, products, onClose, onCreated }: { orgBots: Bot
       </Field>
       <Field label="会议类型">
         <div className="flex gap-1.5">
-          {(Object.keys(MEETING_KIND) as MeetingKind[]).map((k) => (
+          {(Object.keys(MEETING_KIND) as MeetingKind[]).filter((k) => k !== 'review').map((k) => (
             <button
               key={k}
               onClick={() => setKind(k)}
@@ -438,7 +439,7 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold tracking-tight">{meeting.title}</h1>
-              <span className={cx('rounded px-2 py-0.5 text-[11px] font-medium', KIND_CLS[meeting.kind])}>{MEETING_KIND[meeting.kind].label}</span>
+              <span className={cx('rounded px-2 py-0.5 text-[11px] font-medium', KIND_CLS[meeting.kind] ?? 'bg-slate-100 text-slate-600')}>{MEETING_KIND[meeting.kind]?.label ?? meeting.kind}</span>
               {meeting.status === 'done' && <span className="rounded bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">已结束</span>}
               {meeting.status === 'running' && <span className="rounded bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-700">进行中</span>}
             </div>
@@ -840,7 +841,7 @@ function MeetingListItem({ meeting, onOpen, onRemove }: { meeting: Meeting; onOp
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate font-semibold">{meeting.title}</span>
-            <span className={cx('shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium', KIND_CLS[meeting.kind])}>{MEETING_KIND[meeting.kind].label}</span>
+            <span className={cx('shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium', KIND_CLS[meeting.kind] ?? 'bg-slate-100 text-slate-600')}>{MEETING_KIND[meeting.kind]?.label ?? meeting.kind}</span>
             {meeting.status === 'done' && <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">已结束</span>}
             {meeting.status === 'running' && <span className="shrink-0 rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">进行中</span>}
           </div>

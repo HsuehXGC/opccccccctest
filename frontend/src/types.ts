@@ -203,7 +203,7 @@ export interface WikiDoc {
 // ── 会议 ───────────────────────────────────────────────
 // 虚拟人力(claude plan 模式) + 真人群聊，对项目立项/变更做 PM 讨论，
 // 产品经理会后整理出执行计划 + 会议纪要，指导后续工作。
-export type MeetingKind = 'kickoff' | 'change' | 'standup' | 'docgen'
+export type MeetingKind = 'kickoff' | 'change' | 'standup' | 'docgen' | 'review'
 export type MeetingStatus = 'draft' | 'running' | 'done'
 
 export interface MeetingMessage {
