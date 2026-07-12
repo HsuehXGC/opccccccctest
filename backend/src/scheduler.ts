@@ -103,7 +103,11 @@ function startJob(job: Job, executorId: string): void {
   inc(executorId)
   gateway.on('job', onJob)
   try {
-    remoteJobId = gateway.dispatch(executorId, job.prompt, job.cwd ?? undefined, job.mode === 'plan' ? 'plan' : undefined).jobId
+    // 构建/测试 job = shell 任务：prompt 即 shell 命令，走 cmd 通道（不跑 claude）
+    const isShell = job.kind === 'build' || job.kind === 'test'
+    remoteJobId = isShell
+      ? gateway.dispatch(executorId, '', job.cwd ?? undefined, undefined, job.prompt).jobId
+      : gateway.dispatch(executorId, job.prompt, job.cwd ?? undefined, job.mode === 'plan' ? 'plan' : undefined).jobId
     console.log(`▶ scheduler ${job.id} → ${executorId} (${job.kind}${job.ref_id ? ' ' + job.ref_id : ''})`)
   } catch (err) {
     cleanup()

@@ -418,10 +418,10 @@ function WorkspaceModal({ projectId, onClose }: { projectId: string; onClose: ()
   const fillVioraAI = () => {
     setRepoPath('/Users/hsueh/VioraAI V3 Demo')
     setBranch('main')
-    setBuildCmd('mvn -q -DskipTests package')
-    setTestCmd('mvn -q test')
+    setBuildCmd('mvn -B -DskipTests package')
+    setTestCmd('mvn -B test')
     setRunCmd('java -jar target/viora-demo-1.20.0-DEMO.jar')
-    setEnv('JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home PATH=$JAVA_HOME/bin:$PATH')
+    setEnv('export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home; export PATH="$JAVA_HOME/bin:$PATH"')
     setMachine('HsuehM3book.local')
   }
 

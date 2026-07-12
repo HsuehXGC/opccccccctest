@@ -205,19 +205,23 @@ function gitSummary(dir, before) {
   return `\n\n---\n## GIT 变更\n${parts.join('\n\n')}`
 }
 
-function runJob({ jobId, kind, prompt, cwd, mode }) {
+function runJob({ jobId, kind, prompt, cwd, mode, cmd }) {
   const execId = `${machineId}-${kind}`
   busy.add(execId)
   const gitBefore = cwd ? git(cwd, 'rev-parse HEAD') : ''
-  const bin = binOf[kind] || findBin(kind) || kind
-  const isClaude = kind !== 'codex'
+  // shell 任务（构建/测试）：cmd 存在时用 bash -lc 跑命令，不跑 claude
+  const isShell = !!cmd
+  const bin = isShell ? 'bash' : binOf[kind] || findBin(kind) || kind
+  const isClaude = !isShell && kind !== 'codex'
   // claude 用 stream-json + 部分消息拿逐 token 会话内容；
   // --dangerously-skip-permissions 绕过 headless 下的首次信任/权限提示（否则无人应答会挂起）。
   // 注：--permission-mode plan 在 headless 无人审批会挂起，故不使用；「只讨论不执行」由提示词约束。
-  const args = isClaude
-    ? ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--dangerously-skip-permissions']
-    : ['exec', prompt]
-  console.log(`▶ job ${jobId}: ${bin} ${isClaude ? `-p${mode === 'plan' ? ' (plan意图)' : ''}` : 'exec'} "${String(prompt).slice(0, 50)}…"`)
+  const args = isShell
+    ? ['-lc', cmd]
+    : isClaude
+      ? ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--dangerously-skip-permissions']
+      : ['exec', prompt]
+  console.log(`▶ job ${jobId}: ${isShell ? `shell「${String(cmd).slice(0, 60)}」` : bin + (isClaude ? ` -p "${String(prompt).slice(0, 40)}…"` : ' exec')}`)
 
   let child
   try {
@@ -282,6 +286,13 @@ function runJob({ jobId, kind, prompt, cwd, mode }) {
     running.delete(jobId)
     console.log(`■ job ${jobId} 结束 exit=${code} · stdout ${stdoutBytes} 字节 · streamed ${streamed.length} · result ${result.length}`)
     let final = (result || streamed).trim()
+    if (isShell) {
+      // shell 任务（构建/测试）：exit 0 即成功（即使静默无输出）；非 0 = 失败，回传日志尾部
+      const tail = final.slice(-4000)
+      if (code === 0) send({ t: 'job:done', jobId, exitCode: 0, result: `✅ 命令成功（exit 0）\n\n${tail || '（无输出）'}` })
+      else send({ t: 'job:error', jobId, error: `❌ 命令失败（exit ${code}）\n\n${tail || '（无输出）'}` })
+      return
+    }
     // repo 任务：把 git 变更摘要附到产出（G0.3）
     if (cwd && final) final += gitSummary(cwd, gitBefore)
     if (code === 0 && final) send({ t: 'job:done', jobId, exitCode: 0, result: final })

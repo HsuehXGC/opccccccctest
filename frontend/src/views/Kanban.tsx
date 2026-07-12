@@ -665,6 +665,69 @@ function BatchRun({ tasks }: { tasks: Task[] }) {
   )
 }
 
+// ── 构建测试版本：在工作区跑 build 命令（shell job，G2.1）──
+function BuildButton() {
+  const currentProjectId = useStore((s) => s.currentProjectId)
+  const project = useStore((s) => s.projects.find((p) => p.id === currentProjectId))
+  const token = useAuth((s) => s.token)
+  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const ws = project?.workspace
+  if (!ws?.repoPath || !ws.buildCmd) return null
+
+  async function build() {
+    if (!token || !ws || status === 'running') return
+    setStatus('running')
+    const refId = `build:${currentProjectId}`
+    try {
+      await authApi.enqueueJobs(token, [
+        {
+          kind: 'build',
+          refType: 'build',
+          refId,
+          title: `构建 ${project?.name ?? ''}`,
+          prompt: `${ws.env ? ws.env + '\n' : ''}${ws.buildCmd}`,
+          cwd: ws.repoPath,
+          targetMachine: ws.machine ?? null,
+        },
+      ])
+      toast('构建已入队，在工作区执行中…', 'success')
+      // 轮询该 build job
+      for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 5000))
+        const { jobs } = await authApi.listJobs(token, { refId })
+        const j = jobs[0]
+        if (!j) continue
+        if (j.status === 'done') {
+          setStatus('done')
+          toast('✅ 构建成功', 'success')
+          return
+        }
+        if (j.status === 'error') {
+          setStatus('error')
+          toast('❌ 构建失败：' + (j.error || '').slice(0, 120), 'warn')
+          return
+        }
+      }
+      setStatus('idle')
+    } catch (err) {
+      setStatus('error')
+      toast('构建入队失败：' + (err as Error).message, 'warn')
+    }
+  }
+
+  const label = status === 'running' ? '构建中…' : status === 'done' ? '✅ 构建成功' : status === 'error' ? '❌ 构建失败' : '构建测试版本'
+  return (
+    <button
+      onClick={build}
+      disabled={status === 'running'}
+      title={`在工作区跑：${ws.buildCmd}`}
+      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
+    >
+      {status === 'running' ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} {label}
+    </button>
+  )
+}
+
 // ── 复核通过：把「待复核且有真实产出」的任务批量通过为完成 ──
 function ReviewApprove({ tasks }: { tasks: Task[] }) {
   const moveTask = useStore((s) => s.moveTask)
@@ -811,6 +874,7 @@ export function Kanban() {
           <AiAssign tasks={filtered} />
           <BatchRun tasks={filtered} />
           <ReviewApprove tasks={filtered} />
+          <BuildButton />
         </div>
       </header>
 
