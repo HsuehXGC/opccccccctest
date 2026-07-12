@@ -432,16 +432,6 @@ function WorkspaceModal({ projectId, onClose }: { projectId: string; onClose: ()
   const [env, setEnv] = useState(ws?.env ?? '')
   const [machine, setMachine] = useState(ws?.machine ?? '')
 
-  const fillVioraAI = () => {
-    setRepoPath('/Users/hsueh/VioraAI V3 Demo')
-    setBranch('main')
-    setBuildCmd('mvn -B -DskipTests package')
-    setTestCmd('mvn -B test')
-    setRunCmd('java -jar target/viora-demo-1.20.0-DEMO.jar')
-    setEnv('export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home; export PATH="$JAVA_HOME/bin:$PATH"')
-    setMachine('HsuehM3book.local')
-  }
-
   function save() {
     if (!repoPath.trim()) {
       setProjectWorkspace(projectId, undefined)
@@ -454,30 +444,29 @@ function WorkspaceModal({ projectId, onClose }: { projectId: string; onClose: ()
 
   return (
     <Modal open onClose={onClose} title={`工作区 · ${project?.name ?? ''}`}>
-      <div className="mb-3 flex items-center justify-between rounded-lg bg-brand-soft/50 px-3 py-2 text-[11px] text-slate-500">
+      <div className="mb-3 rounded-lg bg-brand-soft/50 px-3 py-2 text-[11px] text-slate-500">
         接入真实代码仓库后，任务会由执行器在这个 repo 里真改代码、构建、测试、发版。
-        <button onClick={fillVioraAI} className="shrink-0 rounded px-2 py-0.5 text-[11px] font-medium text-brand ring-1 ring-brand/30 hover:bg-brand-soft">填 VioraAI 预设</button>
       </div>
       <Field label="Repo 路径（执行器本地绝对路径）">
-        <input className={inputCls} value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="/Users/hsueh/VioraAI V3 Demo" autoFocus />
+        <input className={inputCls} value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="执行器上仓库的绝对路径" autoFocus />
       </Field>
       <Field label="执行机器名（有该 repo 的机器；对应本地算力里的机器名）">
-        <input className={inputCls} value={machine} onChange={(e) => setMachine(e.target.value)} placeholder="HsuehM3book.local" />
+        <input className={inputCls} value={machine} onChange={(e) => setMachine(e.target.value)} placeholder="对应本地算力里的机器名" />
       </Field>
       <Field label="默认分支">
         <input className={inputCls} value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />
       </Field>
       <Field label="构建命令">
-        <input className={inputCls} value={buildCmd} onChange={(e) => setBuildCmd(e.target.value)} placeholder="mvn -q -DskipTests package" />
+        <input className={inputCls} value={buildCmd} onChange={(e) => setBuildCmd(e.target.value)} placeholder="如 npm run build" />
       </Field>
       <Field label="测试命令">
-        <input className={inputCls} value={testCmd} onChange={(e) => setTestCmd(e.target.value)} placeholder="mvn -q test" />
+        <input className={inputCls} value={testCmd} onChange={(e) => setTestCmd(e.target.value)} placeholder="如 npm test（没有可留空）" />
       </Field>
       <Field label="运行/预览命令">
-        <input className={inputCls} value={runCmd} onChange={(e) => setRunCmd(e.target.value)} placeholder="java -jar target/xxx.jar" />
+        <input className={inputCls} value={runCmd} onChange={(e) => setRunCmd(e.target.value)} placeholder="如 npm run dev" />
       </Field>
       <Field label="环境变量前缀（可选，执行命令时带上）">
-        <input className={inputCls} value={env} onChange={(e) => setEnv(e.target.value)} placeholder="JAVA_HOME=... PATH=$JAVA_HOME/bin:$PATH" />
+        <input className={inputCls} value={env} onChange={(e) => setEnv(e.target.value)} placeholder="如 export PATH=..." />
       </Field>
       <div className="mt-4 flex justify-end gap-2">
         <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100">取消</button>

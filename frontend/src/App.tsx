@@ -5,7 +5,6 @@ import { useAuth } from './store/useAuth'
 import { Avatar, cx } from './lib/ui'
 import { Toaster } from './lib/toast'
 import { CommandPalette } from './components/CommandPalette'
-import { bootstrapImport } from './lib/bootstrapImport'
 import { bootstrapCloud, startAutoSync } from './lib/cloudBridge'
 import { applyJobs } from './lib/cloudJobs'
 import { connectBus, onCloudChange } from './lib/cloudBus'
@@ -57,11 +56,6 @@ export function App() {
   useEffect(() => {
     void loadMe()
   }, [loadMe])
-
-  // 首次启动自动导入 PlotMax 2.0 演示数据（幂等，归属 org-1）
-  useEffect(() => {
-    void bootstrapImport()
-  }, [])
 
   // 登录后：云端有数据则拉下来（PG 为真相、多设备一致），随后本地改动防抖回写 PG
   useEffect(() => {

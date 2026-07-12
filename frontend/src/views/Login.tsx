@@ -121,22 +121,6 @@ export function Login() {
             </p>
           )}
         </div>
-
-        {/* 演示账号 */}
-        {!isRegister && (
-          <button
-            onClick={() => {
-              setEmail('xueguanchen@gmail.com')
-              setPassword('plotmax2025')
-              clearError()
-            }}
-            className="mt-4 w-full rounded-xl border border-dashed border-slate-300 bg-white/60 px-4 py-2.5 text-left text-xs text-slate-500 transition hover:border-brand/40 hover:text-slate-700"
-          >
-            <span className="font-medium text-slate-600">演示账号（含 PlotMax 数据）</span> · 点此填入
-            <br />
-            <span className="font-mono">xueguanchen@gmail.com / plotmax2025</span>
-          </button>
-        )}
       </div>
     </div>
   )
