@@ -197,3 +197,24 @@ ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cwd text;
 
 -- job 定向机器名（repo 任务必须派到有该 repo 的机器；按稳定的机器名匹配）
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS target_machine text;
+
+-- autopilot 迭代（Gap 1）：一轮=规划→执行→复核→集成→构建→测试→发布→待评审
+CREATE TABLE IF NOT EXISTS iterations (
+  id          text PRIMARY KEY,
+  org_id      text NOT NULL,
+  project_id  text NOT NULL,
+  round       integer NOT NULL DEFAULT 1,
+  goal        text NOT NULL DEFAULT '',
+  feedback    text NOT NULL DEFAULT '',        -- 上轮人工评审反馈
+  status      text NOT NULL DEFAULT 'planning', -- planning|executing|qa|integrating|building|testing|releasing|awaiting_review|done|error
+  phase_log   jsonb NOT NULL DEFAULT '[]',      -- 每阶段进展日志（供前端看进度）
+  tasks       jsonb NOT NULL DEFAULT '[]',      -- 本轮规划的任务 + 结果
+  release_ver text,
+  changelog   text NOT NULL DEFAULT '',
+  error       text,
+  payload     jsonb,                            -- 重启恢复用（workspace 等）
+  created_at  bigint NOT NULL DEFAULT 0,
+  updated_at  bigint NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_iter_project ON iterations(project_id);
+CREATE INDEX IF NOT EXISTS idx_iter_org ON iterations(org_id);

@@ -11,6 +11,7 @@ import { createJob, listJobs, getJob, activeRefIds } from './jobStore.ts'
 import { importSnapshot, getOrgState, orgHasData } from './stateStore.ts'
 import { orchestrateMeeting, getMeeting, isMeetingRunning, orgHasExecutor, recoverMeetings, type MeetingRunPayload } from './meetingRunner.ts'
 import { addBusConn, notifyOrg } from './bus.ts'
+import { runIteration, getIteration, isProjectRunning } from './autopilot.ts'
 import {
   changePassword,
   createMember,
@@ -349,6 +350,22 @@ app.get('/api/meetings/:id', requireAuth, async (req: AuthedRequest, res) => {
   const meeting = await getMeeting(req.auth!.user.orgId, String(req.params.id))
   if (!meeting) return res.status(404).json({ error: '会议不存在' })
   res.json({ meeting, running: isMeetingRunning(String(req.params.id)) })
+})
+
+// ── autopilot 自驾：启动一轮迭代 + 查询状态 ──────────────────────
+app.post('/api/autopilot/run', requireAuth, async (req: AuthedRequest, res) => {
+  if (!dbEnabled) return res.status(503).json({ error: '云端未启用' })
+  const { projectId, goal, feedback } = req.body ?? {}
+  if (!projectId || !goal) return res.status(400).json({ error: 'projectId 和 goal 必填' })
+  const r = await runIteration(req.auth!.user.orgId, String(projectId), String(goal), String(feedback ?? ''))
+  if (!r.ok) return res.status(400).json({ error: r.error })
+  res.json({ ok: true })
+})
+
+app.get('/api/autopilot/:projectId', requireAuth, async (req: AuthedRequest, res) => {
+  if (!dbEnabled) return res.json({ iteration: null, running: false })
+  const iteration = await getIteration(req.auth!.user.orgId, String(req.params.projectId))
+  res.json({ iteration, running: isProjectRunning(String(req.params.projectId)) })
 })
 
 const PORT = Number(process.env.PORT) || 8787

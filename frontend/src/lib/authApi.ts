@@ -55,6 +55,8 @@ export const authApi = {
   enqueueJobs: (token: string, jobs: unknown[]) => req<{ ok: true; jobs: { id: string; refId: string | null; status: string }[] }>('/jobs', { method: 'POST', body: { jobs }, token }),
   runMeeting: (token: string, meetingId: string, payload: unknown) => req<{ ok: true; running: boolean }>(`/meetings/${meetingId}/run`, { method: 'POST', body: payload, token }),
   getMeeting: (token: string, meetingId: string) => req<{ meeting: Record<string, unknown>; running: boolean }>(`/meetings/${meetingId}`, { token }),
+  runAutopilot: (token: string, body: { projectId: string; goal: string; feedback?: string }) => req<{ ok: true }>('/autopilot/run', { method: 'POST', body, token }),
+  getAutopilot: (token: string, projectId: string) => req<{ iteration: Iteration | null; running: boolean }>(`/autopilot/${projectId}`, { token }),
   listJobs: (token: string, opts: { refId?: string; refType?: string; status?: string } = {}) => {
     const qs = new URLSearchParams(opts as Record<string, string>).toString()
     return req<{ jobs: CloudJob[] }>(`/jobs${qs ? '?' + qs : ''}`, { token })
@@ -106,6 +108,21 @@ export async function runExecutorStream(
       }
     }
   }
+}
+
+export interface Iteration {
+  id: string
+  project_id: string
+  round: number
+  goal: string
+  feedback: string
+  status: string
+  phase_log: { t: number; msg: string }[]
+  tasks: { title: string; role: string; brief: string; branch?: string; status?: string; verdict?: string }[]
+  release_ver: string | null
+  changelog: string
+  error: string | null
+  created_at: number
 }
 
 export interface CloudJob {
