@@ -285,6 +285,7 @@ app.get('/api/jobs', requireAuth, async (req: AuthedRequest, res) => {
   try {
     const jobs = await listJobs(req.auth!.user.orgId, {
       refId: req.query.refId ? String(req.query.refId) : undefined,
+      refType: req.query.refType ? String(req.query.refType) : undefined,
       status: req.query.status ? String(req.query.status) : undefined,
     })
     res.json({ jobs })

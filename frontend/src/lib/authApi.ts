@@ -55,7 +55,7 @@ export const authApi = {
   enqueueJobs: (token: string, jobs: unknown[]) => req<{ ok: true; jobs: { id: string; refId: string | null; status: string }[] }>('/jobs', { method: 'POST', body: { jobs }, token }),
   runMeeting: (token: string, meetingId: string, payload: unknown) => req<{ ok: true; running: boolean }>(`/meetings/${meetingId}/run`, { method: 'POST', body: payload, token }),
   getMeeting: (token: string, meetingId: string) => req<{ meeting: Record<string, unknown>; running: boolean }>(`/meetings/${meetingId}`, { token }),
-  listJobs: (token: string, opts: { refId?: string; status?: string } = {}) => {
+  listJobs: (token: string, opts: { refId?: string; refType?: string; status?: string } = {}) => {
     const qs = new URLSearchParams(opts as Record<string, string>).toString()
     return req<{ jobs: CloudJob[] }>(`/jobs${qs ? '?' + qs : ''}`, { token })
   },

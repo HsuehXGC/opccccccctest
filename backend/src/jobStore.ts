@@ -85,10 +85,11 @@ export async function activeRefIds(orgId: string): Promise<string[]> {
 }
 
 /** 列出某账户组的 jobs（可按 ref/status 过滤），供前端轮询 */
-export function listJobs(orgId: string, opts: { refId?: string; status?: string; limit?: number } = {}): Promise<Job[]> {
+export function listJobs(orgId: string, opts: { refId?: string; refType?: string; status?: string; limit?: number } = {}): Promise<Job[]> {
   const where = ['org_id=$1']
   const args: unknown[] = [orgId]
   if (opts.refId) { args.push(opts.refId); where.push(`ref_id=$${args.length}`) }
+  if (opts.refType) { args.push(opts.refType); where.push(`ref_type=$${args.length}`) }
   if (opts.status) { args.push(opts.status); where.push(`status=$${args.length}`) }
   args.push(opts.limit ?? 200)
   return q<Job>(`SELECT * FROM jobs WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT $${args.length}`, args)

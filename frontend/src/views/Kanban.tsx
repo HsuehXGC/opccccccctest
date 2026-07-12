@@ -799,6 +799,74 @@ function IntegrateButton({ tasks }: { tasks: Task[] }) {
   )
 }
 
+// ── 发布测试版本：在 opc/integration 上出版本+changelog+构建+tag（shell job，G2.4）──
+function ReleaseButton() {
+  const currentProjectId = useStore((s) => s.currentProjectId)
+  const project = useStore((s) => s.projects.find((p) => p.id === currentProjectId))
+  const token = useAuth((s) => s.token)
+  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const ws = project?.workspace
+  if (!ws?.repoPath || !ws.buildCmd) return null
+
+  async function run() {
+    if (!token || !ws || status === 'running') return
+    setStatus('running')
+    const d = new Date()
+    const ver = `test-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`
+    const base = ws.branch || 'main'
+    const refId = `release:${ver}`
+    const script = [
+      ws.env || '',
+      'set +e',
+      `git checkout opc/integration 2>/dev/null || git checkout "${base}"`,
+      `echo "===VERSION==="; echo "${ver}"`,
+      `echo "===CHANGELOG==="; git log ${base}..HEAD --pretty=format:"- %s (%h)" 2>/dev/null | head -50; echo ""`,
+      `echo "===BUILD==="; ${ws.buildCmd} 2>&1 | tail -6`,
+      `echo "===ARTIFACT==="; ls -t target/*.jar 2>/dev/null | head -1 || echo "(无产物)"`,
+      `git tag "${ver}" 2>/dev/null`,
+      `echo "===RUN==="; echo '${(ws.runCmd || '').replace(/'/g, "")}'`,
+    ]
+      .filter(Boolean)
+      .join('\n')
+    try {
+      await authApi.enqueueJobs(token, [{ kind: 'release', refType: 'release', refId, title: ver, prompt: script, cwd: ws.repoPath, targetMachine: ws.machine ?? null }])
+      toast(`发布 ${ver} 中——构建测试版本…`, 'success')
+      for (let i = 0; i < 90; i++) {
+        await new Promise((r) => setTimeout(r, 5000))
+        const { jobs } = await authApi.listJobs(token, { refId })
+        const j = jobs[0]
+        if (!j) continue
+        if (j.status === 'done') {
+          setStatus('done')
+          toast(`✅ 已发布测试版本 ${ver}，去「发布」查看并 review`, 'success')
+          return
+        }
+        if (j.status === 'error') {
+          setStatus('error')
+          toast('❌ 发布失败：' + (j.error || '').slice(0, 140), 'warn')
+          return
+        }
+      }
+      setStatus('idle')
+    } catch (err) {
+      setStatus('error')
+      toast('发布入队失败：' + (err as Error).message, 'warn')
+    }
+  }
+
+  const label = status === 'running' ? '发布中…' : status === 'done' ? '✅ 已发布' : status === 'error' ? '❌ 发布失败' : '发布测试版本'
+  return (
+    <button
+      onClick={run}
+      disabled={status === 'running'}
+      title="在 opc/integration 上出版本号+changelog+构建产物，打 tag"
+      className="flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:opacity-60"
+    >
+      {status === 'running' ? <Loader2 size={15} className="animate-spin" /> : <Rocket size={15} />} {label}
+    </button>
+  )
+}
+
 // ── AI 复核（QA 门禁）：让 QA bot 判定待复核任务是否达标，PASS 自动通过 ──
 function AiReview({ tasks }: { tasks: Task[] }) {
   const currentOrgId = useStore((s) => s.currentOrgId)
@@ -1011,6 +1079,7 @@ export function Kanban() {
           <IntegrateButton tasks={filtered} />
           <ShellJobButton mode="build" />
           <ShellJobButton mode="test" />
+          <ReleaseButton />
         </div>
       </header>
 

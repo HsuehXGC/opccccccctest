@@ -48,8 +48,8 @@
 | G2.1 | 构建 job | shell job（agent 支持 bash -lc）；「构建测试版本」按钮跑 build 命令，捕获成败+日志。实测 VioraAI `mvn package` BUILD SUCCESS | ✅ |
 | G2.2 | 测试 job + QA 门禁 | 「跑测试」按钮（shell job，mvn test）；「AI 复核」按钮=QA bot 对照要求判定 VERDICT PASS/FAIL，PASS 自动通过、FAIL 留待人工。实测 QA 精准驳回错配任务 | ✅ |
 | G2.3 | 集成/合并 | 「集成」按钮：从 base 建 opc/integration，依次 merge 各 done 任务的 opc/<taskId> 分支，冲突则跳过并报告。实测合并 2 分支无冲突、内容齐 | ✅ |
-| G2.4 | 发布=版本+changelog+预览 | 打 tag/版本号，从本轮 commit 生成 changelog，产出可试的测试版本 | 🔲 |
-| G2.5 | 发布触发器 | 达标即发 / 定时发 | 🔲 |
+| G2.4 | 发布=版本+changelog+预览 | 「发布测试版本」按钮：在 opc/integration 上出版本号+changelog(base..HEAD)+构建产物+打 tag；新增「发布」视图 review 已发布版本(版本/changelog/产物/运行预览)。实测 test-rel-01 全链路 | ✅ |
+| G2.5 | 发布触发器 | 达标即发 / 定时发（并入 Gap 1 autopilot：每轮达标自动发） | 🔲 |
 
 **验收**：一轮结束后 OPC 自动出一个"测试版本"——有版本号、changelog、能跑/能试。
 

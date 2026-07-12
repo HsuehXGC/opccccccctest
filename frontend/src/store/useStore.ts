@@ -32,7 +32,7 @@ import { seedAccounts, seedExecutors, seedMachines, seedProjects } from '../mock
 import { planDecomposition } from '../lib/decompose'
 
 /** 顶层导航视图 */
-export type View = 'dashboard' | 'requirements' | 'wiki' | 'kanban' | 'workforce' | 'meetings' | 'account'
+export type View = 'dashboard' | 'requirements' | 'wiki' | 'kanban' | 'workforce' | 'meetings' | 'releases' | 'account'
 
 const nextVersion = (v: string) => `v${parseInt(v.replace(/^v/, ''), 10) + 1}`
 

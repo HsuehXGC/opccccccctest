@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, Command, FileText, KanbanSquare, LayoutDashboard, Loader2, LogOut, MessagesSquare, Pause, Play, Search, Target, Users } from 'lucide-react'
+import { ChevronDown, Command, FileText, KanbanSquare, LayoutDashboard, Loader2, LogOut, MessagesSquare, Pause, Play, Rocket, Search, Target, Users } from 'lucide-react'
 import { useStore, type View } from './store/useStore'
 import { useAuth } from './store/useAuth'
 import { Avatar, cx } from './lib/ui'
@@ -16,6 +16,7 @@ import { Wiki } from './views/Wiki'
 import { Kanban } from './views/Kanban'
 import { Workforce } from './views/Workforce'
 import { Meetings } from './views/Meetings'
+import { Releases } from './views/Releases'
 import { AccountView } from './views/Account'
 import { Login } from './views/Login'
 
@@ -26,6 +27,7 @@ const NAV: { key: View; label: string; icon: typeof Target }[] = [
   { key: 'kanban', label: '任务看板', icon: KanbanSquare },
   { key: 'workforce', label: '虚拟人力', icon: Users },
   { key: 'meetings', label: '会议', icon: MessagesSquare },
+  { key: 'releases', label: '发布', icon: Rocket },
 ]
 
 export function App() {
@@ -236,6 +238,7 @@ export function App() {
         {view === 'kanban' && <Kanban />}
         {view === 'workforce' && <Workforce />}
         {view === 'meetings' && <Meetings />}
+        {view === 'releases' && <Releases />}
         {view === 'account' && <AccountView />}
       </main>
     </div>
