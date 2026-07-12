@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { q, one } from './db.ts'
 import { createJob, getJob } from './jobStore.ts'
-import { orgHasExecutor } from './meetingRunner.ts'
+import { orgHasExecutor, orchestrateMeeting } from './meetingRunner.ts'
 import { notifyOrg } from './bus.ts'
 
 // ── OPC autopilot：项目大脑，一轮一轮自主推进（Gap 1）──────────────────────
@@ -36,15 +36,71 @@ async function projectMemory(orgId: string, projectId: string, excludeId: string
   return `\n## 项目历史（你之前几轮已做的，别重复、要接续）\n${lines.join('\n')}`
 }
 
+// 接缝1（会议/文档→自驾）：把项目的「PRD 最新版 + 未完成 backlog（需求/任务）」汇成一段喂给规划。
+// project → products(project_id) → docs/doc_versions/requirements/tasks(product_id)。
+// 无 PRD/backlog 时返回空串 → 行为回退到纯 goal 驱动，不破坏既有项目。
+async function projectSpec(projectId: string): Promise<string> {
+  const clip = (s: string, n: number) => (s || '').replace(/\s+$/g, '').slice(0, n)
+  const parts: string[] = []
+
+  // 1) PRD / 规格文档：正文存在 docs.raw.versions[-1].content（前端未同步到 doc_versions 表）。
+  //    取每篇最新版本正文，PRD 类优先，最多 3 篇。
+  const docs = await q<{ title: string; type: string; content: string }>(
+    `SELECT d.title, d.type, COALESCE(d.raw->'versions'->-1->>'content', '') AS content
+       FROM products p
+       JOIN docs d ON d.product_id = p.id
+      WHERE p.project_id = $1
+      ORDER BY (d.type = 'prd') DESC, d.created_at DESC
+      LIMIT 3`,
+    [projectId],
+  ).catch(() => [])
+  const docsClean = docs.filter((d) => d.content.trim())
+  if (docsClean.length) {
+    parts.push(
+      '## 项目规格（PRD / 设计文档，这是本项目的事实源，规划要贴着它走）\n' +
+        docsClean.map((d) => `### ${d.title}（${d.type}）\n${clip(d.content, 1800)}`).join('\n\n'),
+    )
+  }
+
+  // 2) 未完成 backlog：需求 + 任务（高优先在前）
+  const prio = `CASE lower(priority) WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END`
+  const reqs = await q<{ title: string; description: string }>(
+    `SELECT r.title, r.description FROM requirements r JOIN products p ON p.id = r.product_id
+      WHERE p.project_id = $1 AND lower(r.status) NOT IN ('done','shipped','archived','released','closed')
+      ORDER BY ${prio.replace(/priority/g, 'r.priority')} LIMIT 15`,
+    [projectId],
+  ).catch(() => [])
+  const tasks = await q<{ title: string; brief: string }>(
+    `SELECT t.title, t.brief FROM tasks t JOIN products p ON p.id = t.product_id
+      WHERE p.project_id = $1 AND lower(t.status) IN ('backlog','todo','ready','open','planned')
+      ORDER BY ${prio.replace(/priority/g, 't.priority')} LIMIT 15`,
+    [projectId],
+  ).catch(() => [])
+  const items = [
+    ...reqs.map((r) => `- [需求] ${r.title}${r.description ? '：' + clip(r.description, 90) : ''}`),
+    ...tasks.map((t) => `- [任务] ${t.title}${t.brief ? '：' + clip(t.brief, 90) : ''}`),
+  ]
+  if (items.length) {
+    parts.push(
+      '## 待办 backlog（未完成，规划时**优先从这里挑一个够本轮做完的切片**；标题尽量与被认领的条目对应）\n' +
+        items.join('\n'),
+    )
+  }
+
+  return parts.length ? '\n' + parts.join('\n\n') : ''
+}
+
 // ── 提示词（后端自持，不依赖浏览器）──────────────────────────
-function planPrompt(projectName: string, goal: string, feedback: string, memory: string): string {
+function planPrompt(projectName: string, goal: string, feedback: string, memory: string, spec: string): string {
   return [
     `你是「${projectName}」的技术负责人，正在真实代码仓库里工作（当前目录=仓库根）。`,
     `本轮目标：${goal}`,
     feedback ? `上一轮发布后的人工评审反馈（务必据此调整）：${feedback}` : '',
+    spec,
     memory,
     '',
     '请先快速浏览现有代码结构，然后规划**本轮 1–2 个小而具体、低风险、可独立实现并提交**的任务，朝目标推进。',
+    spec ? '**优先从上面的 backlog 里挑**没做过、且一轮能做完的切片；若 backlog 为空则按 PRD/目标继续推进。' : '',
     '严格输出（不要 markdown 代码块）：',
     '先一行：`RATIONALE: 你这样规划的一句话理由（为什么选这些任务）`',
     '随后每个任务一行，用全角竖线 ｜ 分三段：',
@@ -107,7 +163,16 @@ function qaPass(output: string): boolean {
   return /VERDICT:\s*PASS/i.test(output) && !/VERDICT:\s*FAIL/i.test(output)
 }
 
-const envPrefix = (ws: Workspace) => (ws.env ? ws.env + '\n' : '')
+// env 前奏消毒：脚手架解析可能把 markdown 分隔线（--- / === / ``` / # 等）误当成 env，
+// 直接拼进 shell 脚本会让 bash 异常退出。仅保留看起来像 shell 的行（含 =、export、以 . / source 开头）。
+const envPrefix = (ws: Workspace) => {
+  const clean = (ws.env || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !/^[-=*_#`~]+$/.test(l) && (/[=]/.test(l) || /^(export|source|\.)\s/.test(l)))
+    .join('\n')
+  return clean ? clean + '\n' : ''
+}
 
 function integrateScript(ws: Workspace, branches: string[]): string {
   const base = ws.branch || 'main'
@@ -157,8 +222,8 @@ async function waitJob(id: string, maxMs = 25 * 60_000): Promise<{ ok: boolean; 
 async function saveIter(it: any): Promise<void> {
   it.updated_at = now()
   await q(
-    `UPDATE iterations SET round=$2, goal=$3, feedback=$4, status=$5, phase_log=$6, tasks=$7, release_ver=$8, changelog=$9, error=$10, updated_at=$11 WHERE id=$1`,
-    [it.id, it.round, it.goal, it.feedback, it.status, JSON.stringify(it.phase_log), JSON.stringify(it.tasks), it.release_ver ?? null, it.changelog ?? '', it.error ?? null, it.updated_at],
+    `UPDATE iterations SET round=$2, goal=$3, feedback=$4, status=$5, phase_log=$6, tasks=$7, release_ver=$8, changelog=$9, error=$10, updated_at=$11, review=$12 WHERE id=$1`,
+    [it.id, it.round, it.goal, it.feedback, it.status, JSON.stringify(it.phase_log), JSON.stringify(it.tasks), it.release_ver ?? null, it.changelog ?? '', it.error ?? null, it.updated_at, it.review ? JSON.stringify(it.review) : null],
   )
   notifyOrg(it.org_id, 'state')
 }
@@ -216,6 +281,93 @@ export async function runIteration(orgId: string, projectId: string, goal: strin
   return { ok: true }
 }
 
+// ── Seam3：发布后自动评审会 ─────────────────────────────────
+// 团队（产品/项目/测试）对照 PRD 评审刚发布的测试版，产出下一轮建议（goal+feedback）或建议收尾。
+// 复用会议编排（真会议，显示在会议区、人可读转录）。结论存 it.review，供人在发布页一键采纳/收尾/自定义。
+const REVIEW_ROLE_PRIORITY = ['产品', '项目', '测试', '质量', 'QA']
+async function runReviewMeeting(it: any, ws: Workspace, projectName: string): Promise<void> {
+  const bots = await q<{ id: string; name: string; role: string; avatar_seed: string | null }>(
+    `SELECT id, name, role, avatar_seed FROM bots WHERE org_id=$1`,
+    [it.org_id],
+  ).catch(() => [] as any[])
+  if (!bots.length) return // 无虚拟成员 → 跳过，转人工评审
+  const rank = (role: string) => {
+    const i = REVIEW_ROLE_PRIORITY.findIndex((r) => (role || '').includes(r))
+    return i < 0 ? 99 : i
+  }
+  const reviewers = bots.slice().sort((a, b) => rank(a.role) - rank(b.role)).slice(0, 3)
+
+  const spec = await projectSpec(it.project_id)
+  const taskList = (it.tasks || []).map((t: any) => `- ${t.title}（${t.status}）`).join('\n')
+  const context = [
+    `项目：${projectName}`,
+    `本轮目标：${it.goal}`,
+    `发布版本：${it.release_ver}`,
+    it.changelog ? `本轮改动（changelog）：\n${it.changelog}` : '',
+    taskList ? `本轮任务：\n${taskList}` : '',
+    ws.runCmd ? `本地运行方式：${ws.runCmd}` : '',
+    spec,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+
+  const turns = reviewers.map((b) => ({
+    botId: b.id,
+    name: b.name,
+    role: b.role,
+    avatarSeed: b.avatar_seed ?? b.id,
+    head:
+      `你是「${projectName}」项目的${b.role}「${b.name}」，正在参加对刚发布测试版 ${it.release_ver} 的评审会。\n` +
+      `以下是本轮上下文与项目规格：\n\n${context}\n\n已有评审发言：\n`,
+    tail:
+      `请从你的${b.role}专业视角，简明扼要评审（3–6 句）：\n` +
+      `① 本轮目标「${it.goal}」是否达成、交付质量如何；\n` +
+      `② 对照 PRD/规格，离 MVP/目标还差哪些关键项；\n` +
+      `③ 你建议下一轮优先做什么（具体、可一轮做完）。`,
+  }))
+
+  const pm = {
+    head: `你是评审会主持人。以下是各成员对测试版 ${it.release_ver}（本轮目标：${it.goal}）的评审发言：\n\n`,
+    tail:
+      `\n\n请先用 4–8 句中文写一段**评审纪要**（这版交付了什么、达成度、主要问题/共识）。\n` +
+      `随后**另起一段**，严格按下列格式输出机器可读结论（每字段占一行，供系统解析）：\n` +
+      `===DECISION===\n` +
+      `VERDICT: iterate 或 done（PRD/backlog 已基本达成用 done，否则 iterate）\n` +
+      `GOAL: 下一轮一句话目标（VERDICT=done 时写「项目达成」）\n` +
+      `FEEDBACK: 给下一轮的具体改进/优先事项（综合上面建议，1–3 条）`,
+  }
+
+  const meeting = {
+    id: `mtg_review_${it.id}`,
+    projectId: it.project_id,
+    productId: null,
+    title: `评审会 · 第${it.round}轮 ${it.release_ver}`,
+    agenda: `评审测试版 ${it.release_ver}，决定下一轮方向`,
+    participantBotIds: reviewers.map((b) => b.id),
+    references: '',
+    fullDocSlugs: [],
+    createdAt: now(),
+    messages: [],
+  }
+  await orchestrateMeeting(it.org_id, { meeting, rounds: 1, parallel: true, kind: 'review', turns, roundDirectives: [], pm } as any)
+
+  const m = await one<{ output: string }>(`SELECT output FROM meetings WHERE id=$1`, [meeting.id]).catch(() => null)
+  const out = m?.output || ''
+  const [summary, decBlock = ''] = out.split(/===DECISION===/)
+  const grab = (k: string) => (decBlock.match(new RegExp(`${k}\\s*[:：]\\s*(.+)`))?.[1] || '').trim()
+  const v = grab('VERDICT').toLowerCase()
+  const verdict = /done|达成|收尾/.test(v) ? 'done' : 'iterate'
+  it.review = {
+    meetingId: meeting.id,
+    verdict,
+    goal: grab('GOAL') || it.goal,
+    feedback: grab('FEEDBACK') || '',
+    summary: (summary || '').trim().slice(0, 2000),
+    reviewers: reviewers.map((b) => b.name),
+    at: now(),
+  }
+}
+
 async function drive(it: any, ws: Workspace, projectName: string): Promise<void> {
   const mk = (kind: string, prompt: string, extra: any = {}) =>
     createJob({ orgId: it.org_id, kind, prompt, cwd: ws.repoPath, targetMachine: ws.machine ?? null, ...extra })
@@ -224,7 +376,9 @@ async function drive(it: any, ws: Workspace, projectName: string): Promise<void>
     logPhase(it, '规划本轮任务…')
     await saveIter(it)
     const memory = await projectMemory(it.org_id, it.project_id, it.id)
-    const planJob = await mk('plan', planPrompt(projectName, it.goal, it.feedback, memory), { refType: 'plan', refId: `plan:${it.id}` })
+    const spec = await projectSpec(it.project_id) // 接缝1：注入 PRD + backlog
+    if (spec) logPhase(it, '已载入项目规格（PRD/backlog）作为规划依据')
+    const planJob = await mk('plan', planPrompt(projectName, it.goal, it.feedback, memory, spec), { refType: 'plan', refId: `plan:${it.id}` })
     const plan = await waitJob(planJob.id)
     if (!plan.ok) throw new Error('规划失败：' + plan.error)
     const rationale = plan.output.match(/RATIONALE[:：]\s*(.+)/)?.[1]?.trim()
@@ -302,9 +456,22 @@ async function drive(it: any, ws: Workspace, projectName: string): Promise<void>
     const clog = (rel.output.match(/===CHANGELOG===\n([\s\S]*?)\n===/)?.[1] ?? '').trim()
     it.release_ver = ver
     it.changelog = clog
+    it.review = null // 清掉上一轮遗留（同一 it 对象不会跨轮，但稳妥起见）
     it.status = 'awaiting_review'
     logPhase(it, `✅ 已发布 ${ver}，等待人工 review`)
     await saveIter(it)
+
+    // Seam3：自动开评审会 → 团队对照 PRD 评估、给下一轮建议。失败不影响已发布版本（转人工评审）。
+    try {
+      logPhase(it, '评审会进行中：团队正对照 PRD 评估这版交付…')
+      await saveIter(it)
+      await runReviewMeeting(it, ws, projectName)
+      if (it.review) logPhase(it, `评审结论：${it.review.verdict === 'done' ? '建议收尾（项目达成）' : '建议下一轮 → ' + it.review.goal}`)
+      await saveIter(it)
+    } catch (e) {
+      logPhase(it, '⚠️ 评审会未完成（可人工评审）：' + (e as Error).message)
+      await saveIter(it).catch(() => {})
+    }
   } catch (err) {
     it.status = 'error'
     it.error = (err as Error).message

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Rocket, Loader2, RefreshCw, Package, GitCommit, Play, AlertTriangle, Bot, CircleCheck, CircleDashed } from 'lucide-react'
+import { Rocket, Loader2, RefreshCw, Package, GitCommit, Play, AlertTriangle, Bot, CircleCheck, CircleDashed, Users, ListTodo } from 'lucide-react'
 import { useAuth } from '../store/useAuth'
 import { useStore } from '../store/useStore'
 import { authApi, type CloudJob, type Iteration } from '../lib/authApi'
@@ -28,11 +28,15 @@ function Autopilot() {
   const [running, setRunning] = useState(false)
   const hasWs = !!project?.workspace?.repoPath
 
-  async function review(action: 'approve' | 'iterate') {
+  async function review(action: 'approve' | 'iterate', override?: { feedback?: string; goal?: string }) {
     if (!token || !currentProjectId) return
     try {
-      await authApi.reviewAutopilot(token, currentProjectId, { action, feedback: reviewFb.trim() })
-      toast(action === 'approve' ? '已通过本轮发布' : '已据反馈启动下一轮自驾', 'success')
+      await authApi.reviewAutopilot(token, currentProjectId, {
+        action,
+        feedback: override?.feedback ?? reviewFb.trim(),
+        goal: override?.goal,
+      })
+      toast(action === 'approve' ? '已通过本轮发布' : '已启动下一轮自驾', 'success')
       setReviewFb('')
       setTimeout(load, 800)
     } catch (err) {
@@ -82,7 +86,26 @@ function Autopilot() {
           {it.status === 'awaiting_review' ? (
             <>
               <div className="mb-1.5 text-sm font-semibold text-emerald-800">本轮已发布 {it.release_ver} · 待你 review</div>
-              <p className="mb-2 text-[12px] text-emerald-700">看下方版本卡的改动与预览。通过就收尾；不满意就写反馈让 OPC 据此跑下一轮。</p>
+              <p className="mb-2 text-[12px] text-emerald-700">看下方版本卡的改动与预览。可采纳评审会的下一轮建议，或通过收尾，或自己写反馈让 OPC 据此推进。</p>
+              {it.review && (
+                <div className="mb-2 rounded-lg border border-indigo-200 bg-indigo-50/70 p-2.5">
+                  <div className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold text-indigo-800">
+                    <Users size={13} /> 评审会{it.review.reviewers?.length ? ' · ' + it.review.reviewers.join('、') : ''}
+                    <span className={cx('ml-auto rounded px-1.5 py-0.5 text-[10px] font-medium', it.review.verdict === 'done' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700')}>
+                      {it.review.verdict === 'done' ? '团队建议收尾' : '团队建议下一轮'}
+                    </span>
+                  </div>
+                  {it.review.summary && (
+                    <p className="mb-1.5 max-h-44 overflow-y-auto whitespace-pre-wrap text-[11px] leading-relaxed text-slate-600">{it.review.summary}</p>
+                  )}
+                  {it.review.verdict !== 'done' && (
+                    <div className="rounded-md bg-white/70 p-2 text-[11px]">
+                      <div className="font-medium text-indigo-900">下一轮目标：{it.review.goal}</div>
+                      {it.review.feedback && <div className="mt-0.5 whitespace-pre-wrap text-slate-600">{it.review.feedback}</div>}
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           ) : (
             <>
@@ -95,8 +118,12 @@ function Autopilot() {
           <div className="flex gap-2">
             {it.status === 'awaiting_review' ? (
               <>
-                <button onClick={() => review('approve')} className="rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-700">✅ 通过发布</button>
-                <button onClick={() => review('iterate')} className="rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700">据反馈跑下一轮</button>
+                {it.review && it.review.verdict !== 'done' && (
+                  <button onClick={() => review('iterate', { goal: it.review!.goal, feedback: it.review!.feedback })}
+                    className="rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700">采纳建议 → 下一轮</button>
+                )}
+                <button onClick={() => review('approve')} className="rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-700">✅ 通过收尾</button>
+                <button onClick={() => review('iterate')} className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">按我的反馈跑</button>
               </>
             ) : (
               <>
@@ -160,11 +187,73 @@ function Autopilot() {
           )}
         </div>
       )}
+      <BacklogPanel />
     </div>
   )
 }
 
 const cx = (...p: (string | false | undefined)[]) => p.filter(Boolean).join(' ')
+
+// 待办 backlog 面板：显示驱动下一轮自驾的开放待办（评审会/项目会自动增减），支持手动增删。
+function BacklogPanel() {
+  const currentProjectId = useStore((s) => s.currentProjectId)
+  // 注意：Zustand 选择器必须返回稳定引用；在选择器里 .filter() 会每次新建数组，
+  // 触发 useSyncExternalStore 无限重渲染（React #185）。故选出原数组，在组件体里过滤。
+  const allProducts = useStore((s) => s.products)
+  const tasks = useStore((s) => s.tasks)
+  const addTask = useStore((s) => s.addTask)
+  const moveTask = useStore((s) => s.moveTask)
+  const [title, setTitle] = useState('')
+  const [prio, setPrio] = useState<'low' | 'medium' | 'high'>('medium')
+
+  const products = allProducts.filter((p) => p.projectId === currentProjectId)
+  const prodIds = new Set(products.map((p) => p.id))
+  const firstProd = products[0]?.id ?? null
+  const backlog = tasks.filter((t) => t.productId && prodIds.has(t.productId) && t.status === 'backlog')
+  const dot = (p: string) => (p === 'high' || p === 'urgent' ? 'bg-rose-500' : p === 'low' ? 'bg-slate-300' : 'bg-amber-400')
+
+  const add = () => {
+    if (!title.trim() || !firstProd) return
+    addTask({ title: title.trim(), description: '', priority: prio, requirementId: null, kind: 'work', productId: firstProd, brief: title.trim() })
+    setTitle('')
+  }
+
+  return (
+    <div className="mt-3 rounded-xl border border-slate-200 bg-white/60 p-3">
+      <div className="mb-2 flex items-center gap-1.5 text-[12px] font-semibold text-slate-700">
+        <ListTodo size={13} /> 待办 backlog · {backlog.length}
+        <span className="ml-auto text-[10px] font-normal text-slate-400">自驾按此挑下一轮切片 · 评审会/项目会自动增减</span>
+      </div>
+      {backlog.length === 0 ? (
+        <p className="mb-2 text-[11px] text-slate-400">暂无待办 — 自驾按 PRD/目标推进；开评审会或项目会后会自动补充。</p>
+      ) : (
+        <div className="mb-2 max-h-48 space-y-1 overflow-y-auto">
+          {backlog.map((t) => (
+            <div key={t.id} className="group flex items-center gap-2 text-[12px]">
+              <span className={cx('h-1.5 w-1.5 shrink-0 rounded-full', dot(t.priority))} />
+              <span className="truncate text-slate-700">{t.title}</span>
+              <button onClick={() => moveTask(t.id, 'done')} title="标记完成"
+                className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-slate-400 opacity-0 hover:bg-emerald-50 hover:text-emerald-600 group-hover:opacity-100">✓ 完成</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {firstProd && (
+        <div className="flex gap-1.5">
+          <input value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()}
+            placeholder="加一条待办（自驾下一轮可能挑到）…"
+            className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[12px] outline-none focus:border-brand" />
+          <select value={prio} onChange={(e) => setPrio(e.target.value as 'low' | 'medium' | 'high')} className="rounded-lg border border-slate-200 px-1.5 text-[11px] outline-none">
+            <option value="high">高</option>
+            <option value="medium">中</option>
+            <option value="low">低</option>
+          </select>
+          <button onClick={add} disabled={!title.trim()} className="rounded-lg bg-slate-700 px-2.5 py-1.5 text-[12px] font-medium text-white hover:bg-slate-800 disabled:opacity-40">添加</button>
+        </div>
+      )}
+    </div>
+  )
+}
 
 // 解析发布 job 产出里的 ===MARKER=== 段
 function parseRelease(output: string) {

@@ -274,7 +274,10 @@ function runJob({ jobId, kind, prompt, cwd, mode, cmd }) {
     }
   })
   child.stderr.on('data', (d) => {
-    send({ t: 'job:chunk', jobId, stream: 'stderr', text: d.toString() })
+    const text = d.toString()
+    // shell 任务的报错多走 stderr（如 git）；累加进 streamed，失败时 tail 才有内容（否则显示「无输出」）
+    if (isShell) streamed += text
+    send({ t: 'job:chunk', jobId, stream: 'stderr', text })
   })
   child.on('error', (err) => {
     busy.delete(execId)

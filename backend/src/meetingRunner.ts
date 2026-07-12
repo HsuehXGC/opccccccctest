@@ -73,6 +73,82 @@ function transcript(msgs: any[]): string {
   return arr.map((m) => `【${m.speakerName}${m.speakerRole ? ' · ' + m.speakerRole : ''}】\n${String(m.content).trim()}`).join('\n\n')
 }
 
+// ── Seam2：会议 → backlog 写回 ─────────────────────────────────
+// 任何挂了项目的会议结束后，据会议记录+现有 backlog 提炼出「新增/关闭」的 backlog 条目，落到 tasks 表。
+// 新增 = status=backlog（会进 Kanban，也被自驾 projectSpec 读取喂下一轮）；关闭 = 已交付/作废的现有条目置 done。
+// 失败绝不影响会议本身。返回 {added, closed} 供纪要展示。
+async function applyMeetingBacklog(orgId: string, meeting: any): Promise<{ added: number; closed: number }> {
+  const projectId = meeting.projectId
+  if (!projectId) return { added: 0, closed: 0 }
+  // 解析产品：优先会议指定的 productId，否则取该项目第一个产品
+  let productId = meeting.productId as string | null
+  if (!productId) {
+    const prod = await one<{ id: string }>(`SELECT id FROM products WHERE project_id=$1 ORDER BY created_at LIMIT 1`, [projectId]).catch(() => null)
+    productId = prod?.id ?? null
+  }
+  if (!productId) return { added: 0, closed: 0 }
+
+  const openTasks = await q<{ id: string; title: string }>(
+    `SELECT id, title FROM tasks WHERE product_id=$1 AND lower(status) IN ('backlog','todo','ready','open','planned') ORDER BY created_at DESC LIMIT 40`,
+    [productId],
+  ).catch(() => [] as any[])
+
+  const prompt =
+    `以下是一场已结束会议的完整记录与结论。请据此更新项目待办 backlog。\n\n` +
+    `【会议记录】\n${transcript(meeting.messages)}\n\n` +
+    (meeting.output ? `【会议纪要/结论】\n${meeting.output}\n\n` : '') +
+    `【当前未完成 backlog】\n${openTasks.length ? openTasks.map((t) => `- ${t.title}`).join('\n') : '（空）'}\n\n` +
+    `只输出下面两类行（不要多余解释、不要 markdown 代码块）：\n` +
+    `- 每个需要新增的待办一行：\`ADD: 标题 ｜ 一句话简述 ｜ high 或 medium 或 low\`\n` +
+    `- 每个已交付或已作废、应关闭的现有待办一行：\`DONE: 该现有待办标题里的关键词\`\n` +
+    `会议未产生 backlog 变化时，什么都不输出。最多 8 条 ADD。`
+
+  let out = ''
+  try {
+    out = await streamTurn(orgId, prompt, () => {})
+  } catch {
+    return { added: 0, closed: 0 } // 无执行器等 → 静默跳过
+  }
+
+  const adds: { title: string; brief: string; prio: string }[] = []
+  const dones: string[] = []
+  for (const line of out.split('\n')) {
+    const a = line.match(/ADD\s*[:：]\s*(.+)/)
+    if (a) {
+      const c = a[1].split(/[｜|]/).map((s) => s.replace(/[`*]/g, '').trim())
+      if (c[0]) adds.push({ title: c[0].slice(0, 80), brief: (c[1] || c[0]).slice(0, 200), prio: /high|高/.test(c[2] || '') ? 'high' : /low|低/.test(c[2] || '') ? 'low' : 'medium' })
+      continue
+    }
+    const d = line.match(/DONE\s*[:：]\s*(.+)/)
+    if (d) { const kw = d[1].replace(/[`*]/g, '').trim(); if (kw) dones.push(kw.slice(0, 40)) }
+  }
+
+  let closed = 0
+  for (const kw of dones.slice(0, 20)) {
+    const r = await q(
+      `UPDATE tasks SET status='done' WHERE product_id=$1 AND lower(status) IN ('backlog','todo','ready','open','planned') AND title ILIKE '%'||$2||'%'`,
+      [productId, kw],
+    ).catch(() => ({ rowCount: 0 } as any))
+    closed += (r as any).rowCount ?? 0
+  }
+
+  let added = 0
+  const nowMs = Date.now()
+  for (const it of adds.slice(0, 8)) {
+    const id = 'task_' + randomUUID().slice(0, 8)
+    const raw = { id, productId, title: it.title, brief: it.brief, description: '', kind: 'work', status: 'backlog', priority: it.prio, requirementId: null, botId: null, targetDocSlug: null, output: null, progress: 0, dependsOn: [], log: [], createdAt: nowMs, source: 'meeting:' + meeting.id }
+    await q(
+      `INSERT INTO tasks (id, product_id, org_id, title, description, kind, status, priority, brief, progress, depends_on, log, created_at, raw)
+       VALUES ($1,$2,$3,$4,'','work','backlog',$5,$6,0,'[]','[]',$7,$8) ON CONFLICT (id) DO NOTHING`,
+      [id, productId, orgId, it.title, it.prio, it.brief, nowMs, JSON.stringify(raw)],
+    ).catch(() => {})
+    added++
+  }
+
+  if (added || closed) notifyOrg(orgId, 'state')
+  return { added, closed }
+}
+
 /** 编排一场会议：多轮（顺序/并行）流式发言 → PM 整理 → 落库 */
 export async function orchestrateMeeting(orgId: string, payload: MeetingRunPayload): Promise<void> {
   const meeting = payload.meeting
@@ -146,6 +222,12 @@ export async function orchestrateMeeting(orgId: string, payload: MeetingRunPaylo
     } catch (e) {
       meeting.output = (meeting.output || '') + '\n⚠️ ' + (e as Error).message
     }
+    // Seam2：据会议结论写回 backlog（挂了项目的会议才做；失败不影响会议）
+    try {
+      const bl = await applyMeetingBacklog(orgId, meeting)
+      if (bl.added || bl.closed) meeting.output += `\n\n📋 backlog 已更新：新增 ${bl.added} 项、关闭 ${bl.closed} 项。`
+    } catch { /* 静默 */ }
+
     meeting.status = 'done'
     await q(`UPDATE meetings SET raw=$2, status='done', output=$3, run_payload=NULL WHERE id=$1`, [meetingId, JSON.stringify(meeting), meeting.output])
     notifyOrg(orgId, 'meetings')

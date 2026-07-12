@@ -218,3 +218,5 @@ CREATE TABLE IF NOT EXISTS iterations (
 );
 CREATE INDEX IF NOT EXISTS idx_iter_project ON iterations(project_id);
 CREATE INDEX IF NOT EXISTS idx_iter_org ON iterations(org_id);
+-- Seam3：发布后评审会的结论（{meetingId, verdict, goal, feedback, summary, reviewers, at}）
+ALTER TABLE iterations ADD COLUMN IF NOT EXISTS review jsonb;

@@ -99,7 +99,11 @@ export function ProvisionModal({ projectId, projectName, onClose }: { projectId:
       const buildCmd = sec(sc.output, 'BUILD') || 'true'
       const testCmd = sec(sc.output, 'TEST') || 'true'
       const runCmd = sec(sc.output, 'RUN')
+      // env 消毒：过滤 markdown 分隔线（--- / === / ``` 等）等垃圾行，只留像 shell 的行
       const env = sec(sc.output, 'ENV')
+        .split('\n').map((l) => l.trim())
+        .filter((l) => l && !/^[-=*_#`~]+$/.test(l) && (/[=]/.test(l) || /^(export|source|\.)\s/.test(l)))
+        .join('\n')
 
       // 3. 写入工作区（浏览器 store 为源，随后同步 PG）
       setProjectWorkspace(projectId, { repoPath, branch: 'main', buildCmd, testCmd, runCmd, env: env || undefined, machine })

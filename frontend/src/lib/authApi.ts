@@ -123,6 +123,15 @@ export interface Iteration {
   release_ver: string | null
   changelog: string
   error: string | null
+  review?: {
+    meetingId: string
+    verdict: 'iterate' | 'done'
+    goal: string
+    feedback: string
+    summary: string
+    reviewers: string[]
+    at: number
+  } | null
   created_at: number
 }
 

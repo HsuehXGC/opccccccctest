@@ -23,9 +23,17 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
   const J = (v: unknown) => JSON.stringify(v ?? null)
 
   for (const p of projects) {
+    // workspace 后端权威（粘滞）：仅当传入快照带非空 repoPath（浏览器刚 provision/编辑工作区）才采用它，
+    // 否则保留 PG 已有 workspace——防止陈旧标签页 auto-sync 用无 workspace 的旧快照把 repo 配置冲掉（会瘫痪自驾）。
     await q(
       `INSERT INTO projects (id, org_id, name, description, created_at, raw) VALUES ($1,$2,$3,$4,$5,$6)
-       ON CONFLICT (id) DO UPDATE SET name=$3, description=$4, raw=$6`,
+       ON CONFLICT (id) DO UPDATE SET
+         name = excluded.name,
+         description = excluded.description,
+         raw = CASE
+           WHEN COALESCE(excluded.raw -> 'workspace' ->> 'repoPath', '') <> '' THEN excluded.raw
+           ELSE jsonb_set(excluded.raw, '{workspace}', COALESCE(projects.raw -> 'workspace', 'null'::jsonb), true)
+         END`,
       [p.id, orgId, p.name ?? '', p.description ?? '', p.createdAt ?? 0, J(p)],
     )
   }
