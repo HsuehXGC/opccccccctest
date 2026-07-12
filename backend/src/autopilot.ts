@@ -9,6 +9,7 @@ import { notifyOrg } from './bus.ts'
 // 全程复用 job 系统（调度器执行、机器定向、持久化），关页面/重启不中断。
 
 const running = new Set<string>() // project_id 维度，防并发
+const MAX_ROUNDS = 50 // 轮次上限（防跑飞；轮间本就由人工评审 gate，此为兜底）
 const now = () => Date.now()
 
 interface Workspace {
@@ -21,17 +22,34 @@ interface Workspace {
   machine?: string
 }
 
+// 跨轮记忆（G4.5）：把本项目历史迭代（目标 + 发布版本 + changelog）汇成一段，喂给规划
+async function projectMemory(orgId: string, projectId: string, excludeId: string): Promise<string> {
+  const rows = await q<{ round: number; goal: string; release_ver: string | null; changelog: string }>(
+    `SELECT round, goal, release_ver, changelog FROM iterations WHERE org_id=$1 AND project_id=$2 AND id<>$3 AND status='done' ORDER BY round DESC LIMIT 6`,
+    [orgId, projectId, excludeId],
+  )
+  if (rows.length === 0) return ''
+  const lines = rows
+    .slice()
+    .reverse()
+    .map((r) => `- 第${r.round}轮${r.release_ver ? `（发布 ${r.release_ver}）` : ''}：${r.goal}${r.changelog ? '｜改动：' + r.changelog.replace(/\n/g, ' ').slice(0, 120) : ''}`)
+  return `\n## 项目历史（你之前几轮已做的，别重复、要接续）\n${lines.join('\n')}`
+}
+
 // ── 提示词（后端自持，不依赖浏览器）──────────────────────────
-function planPrompt(projectName: string, goal: string, feedback: string): string {
+function planPrompt(projectName: string, goal: string, feedback: string, memory: string): string {
   return [
     `你是「${projectName}」的技术负责人，正在真实代码仓库里工作（当前目录=仓库根）。`,
     `本轮目标：${goal}`,
     feedback ? `上一轮发布后的人工评审反馈（务必据此调整）：${feedback}` : '',
+    memory,
     '',
     '请先快速浏览现有代码结构，然后规划**本轮 1–2 个小而具体、低风险、可独立实现并提交**的任务，朝目标推进。',
-    '严格输出（每个任务一行，用全角竖线 ｜ 分三段，不要多余解释、不要 markdown 代码块）：',
+    '严格输出（不要 markdown 代码块）：',
+    '先一行：`RATIONALE: 你这样规划的一句话理由（为什么选这些任务）`',
+    '随后每个任务一行，用全角竖线 ｜ 分三段：',
     '`TASK: 任务标题 ｜ 负责角色 ｜ 具体做什么（越具体越好，指明大致改哪里）`',
-    '只输出 1–2 行 TASK。不要改任何代码，这一步只做规划。',
+    '只输出 1 行 RATIONALE + 1–2 行 TASK。不要改任何代码，这一步只做规划。',
   ]
     .filter(Boolean)
     .join('\n')
@@ -164,7 +182,8 @@ export async function reviewIteration(
   goal?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const it = await getIteration(orgId, projectId)
-  if (!it || it.status !== 'awaiting_review') return { ok: false, error: '当前没有待评审的迭代' }
+  // 可从 awaiting_review（正常发布）或 error（失败升级）态给结论
+  if (!it || !['awaiting_review', 'error'].includes(it.status)) return { ok: false, error: '当前没有待处理的迭代' }
   await q(`UPDATE iterations SET status='done', feedback=$2, updated_at=$3 WHERE id=$1`, [it.id, feedback || it.feedback || '', now()])
   notifyOrg(orgId, 'state')
   if (action === 'approve') return { ok: true }
@@ -184,6 +203,7 @@ export async function runIteration(orgId: string, projectId: string, goal: strin
 
   const prev = await getIteration(orgId, projectId)
   const round = (prev?.round ?? 0) + 1
+  if (round > MAX_ROUNDS) return { ok: false, error: `已达轮次上限 ${MAX_ROUNDS}，请人工确认后再继续` }
   const id = 'iter_' + randomUUID().slice(0, 10)
   const it: any = { id, org_id: orgId, project_id: projectId, round, goal, feedback: feedback || prev?.feedback || '', status: 'planning', phase_log: [], tasks: [], release_ver: null, changelog: '', error: null, created_at: now(), updated_at: now() }
   await q(
@@ -200,12 +220,15 @@ async function drive(it: any, ws: Workspace, projectName: string): Promise<void>
   const mk = (kind: string, prompt: string, extra: any = {}) =>
     createJob({ orgId: it.org_id, kind, prompt, cwd: ws.repoPath, targetMachine: ws.machine ?? null, ...extra })
   try {
-    // 1. 规划
+    // 1. 规划（带跨轮记忆）
     logPhase(it, '规划本轮任务…')
     await saveIter(it)
-    const planJob = await mk('plan', planPrompt(projectName, it.goal, it.feedback), { refType: 'plan', refId: `plan:${it.id}` })
+    const memory = await projectMemory(it.org_id, it.project_id, it.id)
+    const planJob = await mk('plan', planPrompt(projectName, it.goal, it.feedback, memory), { refType: 'plan', refId: `plan:${it.id}` })
     const plan = await waitJob(planJob.id)
     if (!plan.ok) throw new Error('规划失败：' + plan.error)
+    const rationale = plan.output.match(/RATIONALE[:：]\s*(.+)/)?.[1]?.trim()
+    if (rationale) logPhase(it, '规划思路：' + rationale.slice(0, 120))
     const planned = parsePlan(plan.output)
     if (planned.length === 0) throw new Error('规划未产出可执行任务')
     it.tasks = planned.map((t, i) => ({ ...t, branch: `opc/iter${it.round}-${i + 1}`, status: 'executing', execOutput: '', verdict: '' }))
@@ -220,6 +243,17 @@ async function drive(it: any, ws: Workspace, projectName: string): Promise<void>
       t.execOutput = execResults[i].output
       t.status = execResults[i].ok ? 'executed' : 'exec_failed'
     })
+    // 失败升级：对失败任务重试一次（G4.2）
+    const failedTasks = it.tasks.filter((t: any) => t.status === 'exec_failed')
+    if (failedTasks.length) {
+      logPhase(it, `${failedTasks.length} 个任务执行失败，重试一次…`)
+      await saveIter(it)
+      const retryJobs = await Promise.all(failedTasks.map((t: any) => mk('task', codeTaskPrompt(t, t.branch), { refType: 'iter', refId: `${it.id}:${t.branch}:retry` })))
+      const retryResults = await Promise.all(retryJobs.map((j) => waitJob(j.id)))
+      failedTasks.forEach((t: any, i: number) => {
+        if (retryResults[i].ok) { t.execOutput = retryResults[i].output; t.status = 'executed' }
+      })
+    }
     it.status = 'qa'
     logPhase(it, `执行完成：${it.tasks.filter((t: any) => t.status === 'executed').length}/${it.tasks.length} 成功`)
     await saveIter(it)
@@ -236,7 +270,10 @@ async function drive(it: any, ws: Workspace, projectName: string): Promise<void>
     it.status = 'integrating'
     logPhase(it, `QA 复核：${passed.length} 通过 / ${qaTargets.length - passed.length} 驳回`)
     await saveIter(it)
-    if (passed.length === 0) throw new Error('本轮无任务通过 QA，中止发布')
+    if (passed.length === 0) {
+      const reasons = it.tasks.map((t: any) => `「${t.title}」${t.status === 'passed' ? '' : t.status === 'exec_failed' ? '执行失败' : 'QA驳回'}`).join('；')
+      throw new Error(`本轮没有任务通过验收，未产出可发布版本。原因：${reasons}。可在评审里给反馈后重试。`)
+    }
 
     // 4. 集成
     const integ = await waitJob((await mk('integrate', integrateScript(ws, passed.map((t: any) => t.branch)), { refType: 'iterstep', refId: `integrate:${it.id}` })).id)

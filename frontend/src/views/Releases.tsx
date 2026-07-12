@@ -77,19 +77,37 @@ function Autopilot() {
   return (
     <div className="mb-6 rounded-2xl border border-brand/30 bg-brand-soft/30 p-5">
       <div className="mb-3 flex items-center gap-2 text-sm font-bold text-brand"><Bot size={16} /> OPC 自驾 · {project?.name}</div>
-      {it?.status === 'awaiting_review' && (
-        <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
-          <div className="mb-1.5 text-sm font-semibold text-emerald-800">本轮已发布 {it.release_ver} · 待你 review</div>
-          <p className="mb-2 text-[12px] text-emerald-700">看下方版本卡的改动与预览。通过就收尾；不满意就写反馈让 OPC 据此跑下一轮。</p>
-          <textarea value={reviewFb} onChange={(e) => setReviewFb(e.target.value)} placeholder="评审反馈（可选）：哪里要改、下一轮往哪推进…"
-            className="mb-2 h-16 w-full resize-y rounded-lg border border-emerald-200 px-3 py-2 text-xs outline-none focus:border-emerald-400" />
+      {it && (it.status === 'awaiting_review' || it.status === 'error') && (
+        <div className={cx('mb-3 rounded-xl border p-3', it.status === 'error' ? 'border-rose-200 bg-rose-50/60' : 'border-emerald-200 bg-emerald-50/60')}>
+          {it.status === 'awaiting_review' ? (
+            <>
+              <div className="mb-1.5 text-sm font-semibold text-emerald-800">本轮已发布 {it.release_ver} · 待你 review</div>
+              <p className="mb-2 text-[12px] text-emerald-700">看下方版本卡的改动与预览。通过就收尾；不满意就写反馈让 OPC 据此跑下一轮。</p>
+            </>
+          ) : (
+            <>
+              <div className="mb-1.5 text-sm font-semibold text-rose-800">本轮未产出可发布版本 · 需你决定</div>
+              <p className="mb-2 text-[12px] text-rose-700">{it.error}</p>
+            </>
+          )}
+          <textarea value={reviewFb} onChange={(e) => setReviewFb(e.target.value)} placeholder={it.status === 'error' ? '给点反馈/提示，让 OPC 换个思路重试…' : '评审反馈（可选）：哪里要改、下一轮往哪推进…'}
+            className="mb-2 h-16 w-full resize-y rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-brand" />
           <div className="flex gap-2">
-            <button onClick={() => review('approve')} className="rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-700">✅ 通过发布</button>
-            <button onClick={() => review('iterate')} className="rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700">据反馈跑下一轮</button>
+            {it.status === 'awaiting_review' ? (
+              <>
+                <button onClick={() => review('approve')} className="rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-700">✅ 通过发布</button>
+                <button onClick={() => review('iterate')} className="rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700">据反馈跑下一轮</button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => review('iterate')} className="rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700">据反馈重试</button>
+                <button onClick={() => review('approve')} className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-500 hover:bg-slate-50">关闭本轮</button>
+              </>
+            )}
           </div>
         </div>
       )}
-      {!active && it?.status !== 'awaiting_review' && (
+      {!active && !['awaiting_review', 'error'].includes(it?.status ?? '') && (
         <div className="space-y-2">
           <input value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="本轮目标（如：给风险分析加一个 /health 健康检查端点）"
             className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20" />
