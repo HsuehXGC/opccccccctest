@@ -177,9 +177,38 @@ function renderClaudeEvent(ev) {
 }
 
 // ── 执行一段派单 = 在对应 CLI 上跑 prompt，流式回传 ──────────
+// 在 repo 里跑 git，取一行输出（失败返回空）
+function git(dir, cmd) {
+  try {
+    return execSync(`git -C "${dir}" ${cmd}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+  } catch {
+    return ''
+  }
+}
+
+// 任务完成后，把 repo 的 git 变更（新 commit / 改动文件 / 未提交改动）汇成一段摘要
+function gitSummary(dir, before) {
+  const head = git(dir, 'rev-parse HEAD')
+  if (!head) return '' // 不是 git 仓库
+  const parts = []
+  if (before && head !== before) {
+    const commits = git(dir, `log --oneline ${before}..${head}`)
+    const stat = git(dir, `diff --stat ${before} ${head}`)
+    parts.push(`### 新提交\n${commits}\n\n### 改动文件\n${stat}`)
+  }
+  const dirty = git(dir, 'status --short')
+  if (dirty) {
+    const stat = git(dir, 'diff --stat')
+    parts.push(`### 未提交的工作区改动\n${dirty}\n${stat ? '\n' + stat : ''}`)
+  }
+  if (!parts.length) return `\n\n---\n## GIT 变更\n（无代码改动，HEAD=${head.slice(0, 8)}）`
+  return `\n\n---\n## GIT 变更\n${parts.join('\n\n')}`
+}
+
 function runJob({ jobId, kind, prompt, cwd, mode }) {
   const execId = `${machineId}-${kind}`
   busy.add(execId)
+  const gitBefore = cwd ? git(cwd, 'rev-parse HEAD') : ''
   const bin = binOf[kind] || findBin(kind) || kind
   const isClaude = kind !== 'codex'
   // claude 用 stream-json + 部分消息拿逐 token 会话内容；
@@ -252,7 +281,9 @@ function runJob({ jobId, kind, prompt, cwd, mode }) {
     busy.delete(execId)
     running.delete(jobId)
     console.log(`■ job ${jobId} 结束 exit=${code} · stdout ${stdoutBytes} 字节 · streamed ${streamed.length} · result ${result.length}`)
-    const final = (result || streamed).trim()
+    let final = (result || streamed).trim()
+    // repo 任务：把 git 变更摘要附到产出（G0.3）
+    if (cwd && final) final += gitSummary(cwd, gitBefore)
     if (code === 0 && final) send({ t: 'job:done', jobId, exitCode: 0, result: final })
     else if (code === 0) send({ t: 'job:error', jobId, error: `claude 退出正常但无可解析输出（stdout ${stdoutBytes} 字节）` })
     else send({ t: 'job:error', jobId, error: final || `退出码 ${code}` })

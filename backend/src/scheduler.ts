@@ -19,11 +19,12 @@ const loadByExecutor = new Map<string, number>()
 function inc(exec: string) { loadByExecutor.set(exec, (loadByExecutor.get(exec) ?? 0) + 1) }
 function dec(exec: string) { loadByExecutor.set(exec, Math.max(0, (loadByExecutor.get(exec) ?? 0) - 1)) }
 
-/** 为账户组挑一个有余量的在线执行器（负载最少优先） */
-function pickExecutor(orgId: string): string | null {
+/** 为账户组挑一个有余量的在线执行器（负载最少优先）。
+ *  targetMachine 指定时，只在该机器名上挑（repo 任务必须落到有 repo 的机器）。 */
+function pickExecutor(orgId: string, targetMachine?: string | null): string | null {
   const execs = gateway
     .listMachines()
-    .filter((m) => m.accountId === orgId && m.online)
+    .filter((m) => m.accountId === orgId && m.online && (!targetMachine || m.machine.name === targetMachine))
     .flatMap((m) => m.executors)
     .map((e) => ({ id: e.id, load: loadByExecutor.get(e.id) ?? 0 }))
     .filter((e) => e.load < MAX_PER_EXECUTOR)
@@ -102,7 +103,7 @@ function startJob(job: Job, executorId: string): void {
   inc(executorId)
   gateway.on('job', onJob)
   try {
-    remoteJobId = gateway.dispatch(executorId, job.prompt, undefined, job.mode === 'plan' ? 'plan' : undefined).jobId
+    remoteJobId = gateway.dispatch(executorId, job.prompt, job.cwd ?? undefined, job.mode === 'plan' ? 'plan' : undefined).jobId
     console.log(`▶ scheduler ${job.id} → ${executorId} (${job.kind}${job.ref_id ? ' ' + job.ref_id : ''})`)
   } catch (err) {
     cleanup()
@@ -121,7 +122,7 @@ async function tick(): Promise<void> {
   }
   for (const job of jobs) {
     if (inflight.has(job.id)) continue
-    const exec = pickExecutor(job.org_id)
+    const exec = pickExecutor(job.org_id, job.target_machine)
     if (!exec) continue // 该账户组暂无空闲执行器，下一轮再试
     await markRunning(job.id, exec)
     startJob(job, exec)

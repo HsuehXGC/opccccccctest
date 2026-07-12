@@ -19,6 +19,8 @@ export interface Job {
   error: string | null
   chunks: number
   meta: unknown
+  cwd: string | null
+  target_machine: string | null
   attempts: number
   created_at: number
   started_at: number | null
@@ -36,12 +38,14 @@ export async function createJob(input: {
   prompt: string
   mode?: string | null
   meta?: unknown
+  cwd?: string | null
+  targetMachine?: string | null
 }): Promise<Job> {
   const id = 'job_' + randomUUID().slice(0, 12)
   const rows = await q<Job>(
-    `INSERT INTO jobs (id, org_id, kind, ref_type, ref_id, title, prompt, mode, meta, status, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued',$10) RETURNING *`,
-    [id, input.orgId, input.kind, input.refType ?? null, input.refId ?? null, input.title ?? '', input.prompt, input.mode ?? null, input.meta != null ? JSON.stringify(input.meta) : null, now()],
+    `INSERT INTO jobs (id, org_id, kind, ref_type, ref_id, title, prompt, mode, meta, cwd, target_machine, status, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'queued',$12) RETURNING *`,
+    [id, input.orgId, input.kind, input.refType ?? null, input.refId ?? null, input.title ?? '', input.prompt, input.mode ?? null, input.meta != null ? JSON.stringify(input.meta) : null, input.cwd ?? null, input.targetMachine ?? null, now()],
   )
   return rows[0]
 }

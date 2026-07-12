@@ -267,6 +267,8 @@ app.post('/api/jobs', requireAuth, async (req: AuthedRequest, res) => {
           prompt: String(j.prompt),
           mode: j.mode ?? null,
           meta: j.meta ?? null,
+          cwd: j.cwd ?? null,
+          targetMachine: j.targetMachine ?? null,
         }),
       )
     }

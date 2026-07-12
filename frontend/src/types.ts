@@ -37,6 +37,8 @@ export interface ProjectWorkspace {
   runCmd: string
   /** 环境变量前缀（如 JAVA_HOME=... PATH=...），执行命令时带上 */
   env?: string
+  /** 执行机器名（repo 任务必须派到有该 repo 的机器；对应 machine.name） */
+  machine?: string
 }
 
 export interface Project {

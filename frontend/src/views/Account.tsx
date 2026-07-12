@@ -413,6 +413,7 @@ function WorkspaceModal({ projectId, onClose }: { projectId: string; onClose: ()
   const [testCmd, setTestCmd] = useState(ws?.testCmd ?? '')
   const [runCmd, setRunCmd] = useState(ws?.runCmd ?? '')
   const [env, setEnv] = useState(ws?.env ?? '')
+  const [machine, setMachine] = useState(ws?.machine ?? '')
 
   const fillVioraAI = () => {
     setRepoPath('/Users/hsueh/VioraAI V3 Demo')
@@ -421,13 +422,14 @@ function WorkspaceModal({ projectId, onClose }: { projectId: string; onClose: ()
     setTestCmd('mvn -q test')
     setRunCmd('java -jar target/viora-demo-1.20.0-DEMO.jar')
     setEnv('JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home PATH=$JAVA_HOME/bin:$PATH')
+    setMachine('HsuehM3book.local')
   }
 
   function save() {
     if (!repoPath.trim()) {
       setProjectWorkspace(projectId, undefined)
     } else {
-      setProjectWorkspace(projectId, { repoPath: repoPath.trim(), branch: branch.trim() || 'main', buildCmd: buildCmd.trim(), testCmd: testCmd.trim(), runCmd: runCmd.trim(), env: env.trim() || undefined })
+      setProjectWorkspace(projectId, { repoPath: repoPath.trim(), branch: branch.trim() || 'main', buildCmd: buildCmd.trim(), testCmd: testCmd.trim(), runCmd: runCmd.trim(), env: env.trim() || undefined, machine: machine.trim() || undefined })
     }
     toast('工作区已保存', 'success')
     onClose()
@@ -441,6 +443,9 @@ function WorkspaceModal({ projectId, onClose }: { projectId: string; onClose: ()
       </div>
       <Field label="Repo 路径（执行器本地绝对路径）">
         <input className={inputCls} value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="/Users/hsueh/VioraAI V3 Demo" autoFocus />
+      </Field>
+      <Field label="执行机器名（有该 repo 的机器；对应本地算力里的机器名）">
+        <input className={inputCls} value={machine} onChange={(e) => setMachine(e.target.value)} placeholder="HsuehM3book.local" />
       </Field>
       <Field label="默认分支">
         <input className={inputCls} value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />

@@ -17,9 +17,12 @@
 |---|----|------|------|
 | G0.0 | 执行器环境就绪 | 本机 Java17 ✅ + Maven ✅ + VioraAI 编译通过 ✅；**claude 无头认证待你做（401）** | ⛔ 等 claude 认证 |
 | G0.1 | 项目接入真实工作区 | Project.workspace（repo/分支/build/test/run/env）+ Account 配置弹窗 + VioraAI 预设 | ✅ |
-| G0.2 | 任务派单带 cwd（工作区） | 派任务时把 workspace 作 cwd 传执行器，claude 在真实 repo 里改文件 | 🔲 |
-| G0.3 | 代码任务产出=git 提交 | 捕获 git diff / 新 commit / 改动文件；任务详情看 diff（不再只存文本） | 🔲 |
-| G0.4 | 任务隔离（分支/worktree） | 每任务独立分支或 worktree 执行，互不污染，失败可丢弃 | 🔲 |
+| G0.2 | 任务派单带 cwd（工作区） | job 带 cwd + **target_machine 定向到有 repo 的机器**；claude 在真实 repo 改文件 | ✅ |
+| G0.3 | 代码任务产出=git 提交 | agent 抓 git before/after，把新 commit/改动文件附到产出（实测干净单文件提交） | ✅ |
+| G0.4 | 任务隔离（分支/worktree） | 代码任务提示词先切 `opc/<taskId>` 分支再改再提交（主干不被污染）；worktree 待做 | 🔵 分支已做 |
+
+**Gap 0 已达 DoD**：实测给 VioraAI 派任务 → bot 在 repo 真改代码 → 干净 commit → OPC 看到 diff。
+**试点抓到的护栏**（记 Gap 4）：`git add -A` 会误提交未跟踪的大文件 → 提示词已改为「只 add 本次改动的具体文件」。执行器必须按机器名定向。
 
 **验收（Gap 0 DoD）**：给 VioraAI 派一个小 feature 任务 → bot 在 repo 真改代码 → 产生一个 commit → OPC 能看到 diff。
 

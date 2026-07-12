@@ -564,10 +564,19 @@ function TaskDrawer({ taskId, onClose }: { taskId: string; onClose: () => void }
 // ── 批量执行：把「有负责人且未完成」的任务入队云端调度，后端常驻执行（关页面不中断）──
 function BatchRun({ tasks }: { tasks: Task[] }) {
   const bots = useStore((s) => s.bots)
+  const products = useStore((s) => s.products)
+  const projects = useStore((s) => s.projects)
   const moveTask = useStore((s) => s.moveTask)
   const activeJobRefs = useStore((s) => s.activeJobRefs)
   const token = useAuth((s) => s.token)
   const [busy, setBusy] = useState(false)
+
+  // 任务归属项目的真实工作区（有则走"代码任务"，在 repo 里改代码并提交）
+  const workspaceOf = (t: Task) => {
+    const product = products.find((p) => p.id === t.productId)
+    const project = product && projects.find((p) => p.id === product.projectId)
+    return { project, ws: project?.workspace }
+  }
 
   const activeSet = new Set(activeJobRefs)
   // 已在云端排队/运行的任务（本视图内），按钮据此显示进度、并从可执行集排除
@@ -587,6 +596,32 @@ function BatchRun({ tasks }: { tasks: Task[] }) {
         .map((t) => {
           const bot = bots.find((b) => b.id === t.botId)
           if (!bot) return null
+          const { project, ws } = workspaceOf(t)
+          if (ws?.repoPath) {
+            // 代码任务：在真实 repo 里干活，切分支→改代码→提交（G0.2/G0.3/G0.4）
+            const branch = `opc/${t.id}`
+            const prompt = [
+              assembleSystemPrompt(bot),
+              '',
+              '---',
+              '',
+              `你在项目「${project?.name ?? ''}」的真实代码仓库里工作，当前目录就是仓库根目录。`,
+              '',
+              `# 任务：${t.title}`,
+              t.brief || t.description || '（无简报）',
+              '',
+              '## 执行要求',
+              `1. 先切一个新分支：\`git checkout -b ${branch}\`（若已存在则 \`git checkout ${branch}\`）。`,
+              '2. 读懂相关现有代码，做**小而完整、可编译**的改动，遵循现有代码风格。',
+              '3. 只做本任务范围内的改动，不要顺手改别的。',
+              `4. 提交时**只 \`git add\` 你本次真正改动/新建的具体文件（逐个写明路径）**，`,
+              '   **绝对不要用 `git add -A` / `git add .`**——仓库里可能有大量未跟踪的构建产物/压缩包，不能提交它们。',
+              `   然后 \`git commit -m "feat: ${t.title}"\`（一次清晰提交）。`,
+              '5. 不要执行构建/测试（那是后续独立步骤）。最后简述你改了哪些文件、为什么。',
+            ].join('\n')
+            return { kind: 'task', refType: 'task', refId: t.id, title: t.title, prompt, cwd: ws.repoPath, targetMachine: ws.machine ?? null }
+          }
+          // 纯规划任务：出文本
           return {
             kind: 'task',
             refType: 'task',

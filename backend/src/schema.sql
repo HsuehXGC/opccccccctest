@@ -191,3 +191,9 @@ ALTER TABLE meetings ADD COLUMN IF NOT EXISTS run_payload jsonb;
 
 -- job 附带元数据（如文档撰写 job 的 doc 元信息），供前端据产出重建实体
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS meta jsonb;
+
+-- job 执行工作目录（代码任务的 repo 路径，Gap 0.2）
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cwd text;
+
+-- job 定向机器名（repo 任务必须派到有该 repo 的机器；按稳定的机器名匹配）
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS target_machine text;
