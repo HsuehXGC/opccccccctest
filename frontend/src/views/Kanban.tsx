@@ -665,6 +665,17 @@ function BatchRun({ tasks }: { tasks: Task[] }) {
   )
 }
 
+// env 前奏消毒：过滤 markdown 分隔线（--- / === / ``` / # 等）等垃圾行，只留像 shell 的行。
+// 脚手架解析可能把这类垃圾误当 env 存进工作区，原样拼进 shell 脚本会让 bash 异常退出（exit 2）。
+// 与后端 autopilot.envPrefix 同规则。返回不带尾换行的干净 env（供数组元素拼接，空则由 .filter(Boolean) 剔除）。
+function sanitizeEnv(env?: string): string {
+  return (env || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !/^[-=*_#`~]+$/.test(l) && (/[=]/.test(l) || /^(export|source|\.)\s/.test(l)))
+    .join('\n')
+}
+
 // ── 在工作区跑构建/测试（shell job，G2.1/G2.2）──
 function ShellJobButton({ mode }: { mode: 'build' | 'test' }) {
   const currentProjectId = useStore((s) => s.currentProjectId)
@@ -682,7 +693,7 @@ function ShellJobButton({ mode }: { mode: 'build' | 'test' }) {
     const refId = `${mode}:${currentProjectId}`
     try {
       await authApi.enqueueJobs(token, [
-        { kind: mode, refType: mode, refId, title: `${noun} ${project?.name ?? ''}`, prompt: `${ws.env ? ws.env + '\n' : ''}${cmd}`, cwd: ws.repoPath, targetMachine: ws.machine ?? null },
+        { kind: mode, refType: mode, refId, title: `${noun} ${project?.name ?? ''}`, prompt: `${sanitizeEnv(ws.env) ? sanitizeEnv(ws.env) + '\n' : ''}${cmd}`, cwd: ws.repoPath, targetMachine: ws.machine ?? null },
       ])
       toast(`${noun}已入队，在工作区执行中…`, 'success')
       for (let i = 0; i < 90; i++) {
@@ -743,9 +754,10 @@ function IntegrateButton({ tasks }: { tasks: Task[] }) {
     const base = ws.branch || 'main'
     const branches = doneCode.map((t) => `opc/${t.id}`).join(' ')
     const script = [
-      ws.env || '',
+      sanitizeEnv(ws.env),
       `set +e`,
-      `git checkout "${base}" || { echo "无法切到 ${base}（工作区可能有未提交改动）"; exit 1; }`,
+      `git stash -u >/dev/null 2>&1 || true`, // 暂存未提交/未跟踪改动，避免切分支被脏工作区挡（非破坏性，可 git stash pop 找回）
+      `git checkout "${base}" || { echo "无法切到 ${base}（工作区有未提交改动，暂存后仍失败）"; exit 1; }`,
       `git branch -D opc/integration 2>/dev/null`,
       `git checkout -b opc/integration || exit 1`,
       `MERGED=""; CONFLICTS=""`,
@@ -816,8 +828,9 @@ function ReleaseButton() {
     const base = ws.branch || 'main'
     const refId = `release:${ver}`
     const script = [
-      ws.env || '',
+      sanitizeEnv(ws.env),
       'set +e',
+      `git stash -u >/dev/null 2>&1 || true`, // 暂存未提交改动，避免切分支被脏工作区挡
       `git checkout opc/integration 2>/dev/null || git checkout "${base}"`,
       `echo "===VERSION==="; echo "${ver}"`,
       `echo "===CHANGELOG==="; git log ${base}..HEAD --pretty=format:"- %s (%h)" 2>/dev/null | head -50; echo ""`,

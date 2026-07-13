@@ -23,6 +23,16 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
   const J = (v: unknown) => JSON.stringify(v ?? null)
 
   for (const p of projects) {
+    // env 消毒：脚手架可能把 markdown 分隔线（--- / === 等）误存进 workspace.env，原样拼进 shell 脚本
+    // 会让 bash 异常退出（集成/构建/发布 exit 2）。入库前过滤掉垃圾行，从根上断绝脏 env 回流。
+    if (p?.workspace?.env) {
+      const clean = String(p.workspace.env)
+        .split('\n')
+        .map((l: string) => l.trim())
+        .filter((l: string) => l && !/^[-=*_#`~]+$/.test(l) && (/[=]/.test(l) || /^(export|source|\.)\s/.test(l)))
+        .join('\n')
+      p.workspace.env = clean || undefined
+    }
     // workspace 后端权威（粘滞）：仅当传入快照带非空 repoPath（浏览器刚 provision/编辑工作区）才采用它，
     // 否则保留 PG 已有 workspace——防止陈旧标签页 auto-sync 用无 workspace 的旧快照把 repo 配置冲掉（会瘫痪自驾）。
     await q(

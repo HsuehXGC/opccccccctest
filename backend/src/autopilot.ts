@@ -178,6 +178,7 @@ function integrateScript(ws: Workspace, branches: string[]): string {
   const base = ws.branch || 'main'
   return [
     envPrefix(ws) + 'set +e',
+    `git stash -u >/dev/null 2>&1 || true`, // 暂存未提交改动，避免切分支被脏工作区挡
     `git checkout "${base}" || { echo "无法切到 ${base}"; exit 1; }`,
     `git branch -D opc/integration 2>/dev/null`,
     `git checkout -b opc/integration || exit 1`,
@@ -194,6 +195,7 @@ function releaseScript(ws: Workspace, ver: string): string {
   const base = ws.branch || 'main'
   return [
     envPrefix(ws) + 'set +e',
+    `git stash -u >/dev/null 2>&1 || true`, // 暂存未提交改动，避免切分支被脏工作区挡
     `git checkout opc/integration 2>/dev/null || git checkout "${base}"`,
     `echo "===VERSION==="; echo "${ver}"`,
     `echo "===CHANGELOG==="; git log ${base}..HEAD --pretty=format:"- %s (%h)" 2>/dev/null | head -50; echo ""`,
