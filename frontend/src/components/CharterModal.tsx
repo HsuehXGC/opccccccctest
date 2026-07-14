@@ -3,7 +3,7 @@ import { X, Plus, RotateCcw, CheckCircle2, Ban, Sparkles, Terminal } from 'lucid
 import { useStore } from '../store/useStore'
 import { cx } from '../lib/ui'
 import { toast } from '../lib/toast'
-import { DEFAULT_CHARTERS, charterOf, assembleSystemPrompt } from '../lib/botCharter'
+import { DEFAULT_CHARTERS, FALLBACK_CHARTER, charterOf, assembleSystemPrompt } from '../lib/botCharter'
 import type { Bot } from '../types'
 
 function ListEditor({
@@ -73,7 +73,7 @@ export function CharterModal({ bot, onClose }: { bot: Bot; onClose: () => void }
   )
 
   function resetDefault() {
-    const d = DEFAULT_CHARTERS[bot.role]
+    const d = DEFAULT_CHARTERS[bot.role] ?? FALLBACK_CHARTER
     setMission(d.mission)
     setCanDo([...d.canDo])
     setCannotDo([...d.cannotDo])

@@ -61,10 +61,13 @@ export const DEFAULT_CHARTERS: Record<BotRole, BotCharter> = {
   },
 }
 
+/** 未知角色（如非软件行业的自定义岗位）的兜底 charter，避免 DEFAULT_CHARTERS[role] 取到 undefined 崩溃 */
+export const FALLBACK_CHARTER: BotCharter = { mission: '', canDo: [], cannotDo: [], coreSkills: [] }
+
 /** bot 的有效 charter：显式配置优先，否则用角色默认（并把 bot.skills 合入核心技能） */
 export function charterOf(bot: Bot): BotCharter {
   if (bot.charter) return bot.charter
-  const base = DEFAULT_CHARTERS[bot.role]
+  const base = DEFAULT_CHARTERS[bot.role] ?? FALLBACK_CHARTER
   const coreSkills = Array.from(new Set([...(bot.skills ?? []), ...base.coreSkills]))
   return { ...base, coreSkills }
 }
