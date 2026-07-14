@@ -220,3 +220,13 @@ CREATE INDEX IF NOT EXISTS idx_iter_project ON iterations(project_id);
 CREATE INDEX IF NOT EXISTS idx_iter_org ON iterations(org_id);
 -- Seam3：发布后评审会的结论（{meetingId, verdict, goal, feedback, summary, reviewers, at}）
 ALTER TABLE iterations ADD COLUMN IF NOT EXISTS review jsonb;
+
+-- 项目秘书：真人与秘书的 1:1 对话转录（org 级、跨项目）。秘书每轮读全局简报+近期转录作答。
+CREATE TABLE IF NOT EXISTS secretary_messages (
+  id         text PRIMARY KEY,
+  org_id     text NOT NULL,
+  role       text NOT NULL,            -- 'user' | 'assistant'
+  content    text NOT NULL DEFAULT '',
+  created_at bigint NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_secmsg_org ON secretary_messages(org_id, created_at);

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, Command, FileText, KanbanSquare, LayoutDashboard, Loader2, LogOut, MessagesSquare, Pause, Play, Rocket, Search, Target, Users } from 'lucide-react'
+import { ChevronDown, Command, FileText, KanbanSquare, LayoutDashboard, Loader2, LogOut, MessagesSquare, Pause, Play, Rocket, Search, Sparkles, Target, Users } from 'lucide-react'
 import { useStore, type View } from './store/useStore'
 import { useAuth } from './store/useAuth'
 import { Avatar, cx } from './lib/ui'
@@ -16,6 +16,7 @@ import { Kanban } from './views/Kanban'
 import { Workforce } from './views/Workforce'
 import { Meetings } from './views/Meetings'
 import { Releases } from './views/Releases'
+import { Secretary } from './views/Secretary'
 import { AccountView } from './views/Account'
 import { Login } from './views/Login'
 
@@ -26,6 +27,7 @@ const NAV: { key: View; label: string; icon: typeof Target }[] = [
   { key: 'kanban', label: '任务看板', icon: KanbanSquare },
   { key: 'workforce', label: '虚拟人力', icon: Users },
   { key: 'meetings', label: '会议', icon: MessagesSquare },
+  { key: 'secretary', label: '秘书', icon: Sparkles },
   { key: 'releases', label: '发布', icon: Rocket },
 ]
 
@@ -233,6 +235,7 @@ export function App() {
         {view === 'workforce' && <Workforce />}
         {view === 'meetings' && <Meetings />}
         {view === 'releases' && <Releases />}
+        {view === 'secretary' && <Secretary />}
         {view === 'account' && <AccountView />}
       </main>
     </div>

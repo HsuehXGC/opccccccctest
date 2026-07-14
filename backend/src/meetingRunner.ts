@@ -34,7 +34,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /** 流式派单：把 chunk 通过 onChunk 回调持续吐出，done 时 resolve 最终结果。
  *  开跑前等待在线执行器最多 60s（应对 agent 短暂离线 / 进程重启后重连）。 */
-async function streamTurn(orgId: string, prompt: string, onChunk: (acc: string) => void): Promise<string> {
+export async function streamTurn(orgId: string, prompt: string, onChunk: (acc: string) => void): Promise<string> {
   let exec = pickExec(orgId)
   for (let i = 0; !exec && i < 60; i++) { await sleep(1000); exec = pickExec(orgId) }
   const chosen = exec

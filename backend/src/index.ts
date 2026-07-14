@@ -12,6 +12,7 @@ import { importSnapshot, getOrgState, orgHasData } from './stateStore.ts'
 import { orchestrateMeeting, getMeeting, isMeetingRunning, orgHasExecutor, recoverMeetings, type MeetingRunPayload } from './meetingRunner.ts'
 import { addBusConn, notifyOrg } from './bus.ts'
 import { runIteration, getIteration, isProjectRunning, reviewIteration } from './autopilot.ts'
+import { secretaryChat, getSecretaryTranscript } from './secretary.ts'
 import {
   changePassword,
   createMember,
@@ -376,6 +377,25 @@ app.post('/api/autopilot/:projectId/review', requireAuth, async (req: AuthedRequ
   const r = await reviewIteration(req.auth!.user.orgId, String(req.params.projectId), action, String(feedback ?? ''), goal ? String(goal) : undefined)
   if (!r.ok) return res.status(400).json({ error: r.error })
   res.json({ ok: true })
+})
+
+// ── 项目秘书：1:1 对话（Phase 1 只读问答/头脑风暴）──────────────────
+app.get('/api/secretary', requireAuth, async (req: AuthedRequest, res) => {
+  if (!dbEnabled) return res.json({ messages: [] })
+  const messages = await getSecretaryTranscript(req.auth!.user.orgId)
+  res.json({ messages })
+})
+
+app.post('/api/secretary/chat', requireAuth, async (req: AuthedRequest, res) => {
+  if (!dbEnabled) return res.status(503).json({ error: '云端未启用' })
+  const { message } = req.body ?? {}
+  if (!message || !String(message).trim()) return res.status(400).json({ error: 'message 必填' })
+  try {
+    const r = await secretaryChat(req.auth!.user.orgId, String(message))
+    res.json(r)
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message })
+  }
 })
 
 const PORT = Number(process.env.PORT) || 8787
