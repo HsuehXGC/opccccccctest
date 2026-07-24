@@ -50,7 +50,7 @@ export const authApi = {
 
   // 云端数据 + 调度
   stateMeta: (token: string) => req<{ enabled: boolean; hasData: boolean }>('/state/meta', { token }),
-  importSnapshot: (token: string, snapshot: unknown) => req<{ ok: true; counts: Record<string, number> }>('/import', { method: 'POST', body: { snapshot }, token }),
+  importSnapshot: (token: string, snapshot: unknown, deletes?: unknown) => req<{ ok: true; counts: Record<string, number>; deleted?: number }>('/import', { method: 'POST', body: { snapshot, deletes }, token }),
   getState: (token: string) => req<Record<string, unknown[]>>('/state', { token }),
   enqueueJobs: (token: string, jobs: unknown[]) => req<{ ok: true; jobs: { id: string; refId: string | null; status: string }[] }>('/jobs', { method: 'POST', body: { jobs }, token }),
   runMeeting: (token: string, meetingId: string, payload: unknown) => req<{ ok: true; running: boolean }>(`/meetings/${meetingId}/run`, { method: 'POST', body: payload, token }),

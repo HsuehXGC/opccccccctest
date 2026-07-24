@@ -8,7 +8,7 @@ import { initStore } from './authStore.ts'
 import { migrate, dbEnabled } from './db.ts'
 import { startScheduler } from './scheduler.ts'
 import { createJob, listJobs, getJob, activeRefIds } from './jobStore.ts'
-import { importSnapshot, getOrgState, orgHasData } from './stateStore.ts'
+import { importSnapshot, applyDeletes, getOrgState, orgHasData } from './stateStore.ts'
 import { orchestrateMeeting, getMeeting, isMeetingRunning, orgHasExecutor, recoverMeetings, type MeetingRunPayload } from './meetingRunner.ts'
 import { addBusConn, notifyOrg } from './bus.ts'
 import { runIteration, getIteration, isProjectRunning, reviewIteration } from './autopilot.ts'
@@ -309,9 +309,11 @@ app.get('/api/jobs/:id', requireAuth, async (req: AuthedRequest, res) => {
 app.post('/api/import', requireAuth, async (req: AuthedRequest, res) => {
   if (!dbEnabled) return res.status(503).json({ error: '云端存储未启用' })
   try {
-    const result = await importSnapshot(req.auth!.user.orgId, req.body?.snapshot ?? {})
-    notifyOrg(req.auth!.user.orgId, 'state') // 通知同 org 其他客户端重拉领域数据，实现多端收敛
-    res.json({ ok: true, ...result })
+    const orgId = req.auth!.user.orgId
+    const result = await importSnapshot(orgId, req.body?.snapshot ?? {})
+    const deleted = await applyDeletes(orgId, req.body?.deletes ?? {}) // 增量删除（真删，修复删了云端不删）
+    notifyOrg(orgId, 'state') // 通知同 org 其他客户端重拉领域数据，实现多端收敛
+    res.json({ ok: true, ...result, deleted })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }

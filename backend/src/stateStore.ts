@@ -8,17 +8,17 @@ type Any = Record<string, any>
 
 const arr = (x: unknown): Any[] => (Array.isArray(x) ? (x as Any[]) : [])
 
-/** 把一份前端 store 快照导入到某账户组（幂等 upsert） */
+/** upsert 一批领域行到某账户组（增量友好：只处理传入的行，不做层级过滤）。
+ *  隔离靠：INSERT 一律 org_id=authOrg；ON CONFLICT 时 WHERE <tbl>.org_id=authOrg，
+ *  别的 org 的行(即使 id 撞了)也改不动，杜绝跨 org 覆盖。 */
 export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts: Record<string, number> }> {
-  const projects = arr(snap.projects).filter((p) => p.orgId === orgId)
-  const projectIds = new Set(projects.map((p) => p.id))
-  const products = arr(snap.products).filter((p) => projectIds.has(p.projectId))
-  const productIds = new Set(products.map((p) => p.id))
-  const requirements = arr(snap.requirements).filter((r) => productIds.has(r.productId))
-  const docs = arr(snap.docs).filter((d) => productIds.has(d.productId))
-  const tasks = arr(snap.tasks).filter((t) => productIds.has(t.productId))
-  const bots = arr(snap.bots).filter((b) => b.orgId === orgId)
-  const meetings = arr(snap.meetings).filter((m) => m.orgId === orgId)
+  const projects = arr(snap.projects)
+  const products = arr(snap.products)
+  const requirements = arr(snap.requirements)
+  const docs = arr(snap.docs)
+  const tasks = arr(snap.tasks)
+  const bots = arr(snap.bots)
+  const meetings = arr(snap.meetings)
 
   const J = (v: unknown) => JSON.stringify(v ?? null)
 
@@ -44,7 +44,7 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
            WHEN COALESCE(excluded.raw -> 'workspace' ->> 'repoPath', '') <> '' THEN excluded.raw
            ELSE jsonb_set(excluded.raw, '{workspace}', COALESCE(projects.raw -> 'workspace', 'null'::jsonb), true)
          END
-       WHERE COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((projects.raw->>'updatedAt')::bigint,0)`,
+       WHERE projects.org_id = $2 AND COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((projects.raw->>'updatedAt')::bigint,0)`,
       [p.id, orgId, p.name ?? '', p.description ?? '', p.createdAt ?? 0, J(p)],
     )
   }
@@ -52,7 +52,7 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
     await q(
       `INSERT INTO products (id, project_id, org_id, name, description, current_version, raw) VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (id) DO UPDATE SET project_id=$2, org_id=$3, name=$4, description=$5, current_version=$6, raw=$7
-       WHERE COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((products.raw->>'updatedAt')::bigint,0)`,
+       WHERE products.org_id = $3 AND COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((products.raw->>'updatedAt')::bigint,0)`,
       [p.id, p.projectId, orgId, p.name ?? '', p.description ?? '', p.currentVersion ?? 'v1.0.0', J(p)],
     )
   }
@@ -61,7 +61,7 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
       `INSERT INTO requirements (id, product_id, org_id, title, description, content, priority, status, created_at, raw)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT (id) DO UPDATE SET product_id=$2, org_id=$3, title=$4, description=$5, content=$6, priority=$7, status=$8, raw=$10
-       WHERE COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((requirements.raw->>'updatedAt')::bigint,0)`,
+       WHERE requirements.org_id = $3 AND COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((requirements.raw->>'updatedAt')::bigint,0)`,
       [r.id, r.productId, orgId, r.title ?? '', r.description ?? '', r.content ?? '', r.priority ?? 'medium', r.status ?? 'draft', r.createdAt ?? 0, J(r)],
     )
   }
@@ -70,7 +70,7 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
       `INSERT INTO docs (slug, product_id, org_id, title, type, owner_bot_id, requirement_id, relations, created_at, raw)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT (slug) DO UPDATE SET product_id=$2, org_id=$3, title=$4, type=$5, owner_bot_id=$6, requirement_id=$7, relations=$8, raw=$10
-       WHERE COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((docs.raw->>'updatedAt')::bigint,0)`,
+       WHERE docs.org_id = $3 AND COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((docs.raw->>'updatedAt')::bigint,0)`,
       [d.slug, d.productId, orgId, d.title ?? '', d.type ?? 'prd', d.ownerBotId ?? null, d.requirementId ?? null, J(d.relations ?? []), d.createdAt ?? 0, J(d)],
     )
   }
@@ -79,7 +79,7 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
       `INSERT INTO tasks (id, product_id, org_id, title, description, kind, status, priority, requirement_id, bot_id, brief, target_doc_slug, output, progress, depends_on, log, created_at, raw)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
        ON CONFLICT (id) DO UPDATE SET product_id=$2, org_id=$3, title=$4, description=$5, kind=$6, status=$7, priority=$8, requirement_id=$9, bot_id=$10, brief=$11, target_doc_slug=$12, output=$13, progress=$14, depends_on=$15, log=$16, raw=$18
-       WHERE COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((tasks.raw->>'updatedAt')::bigint,0)`,
+       WHERE tasks.org_id = $3 AND COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((tasks.raw->>'updatedAt')::bigint,0)`,
       [t.id, t.productId, orgId, t.title ?? '', t.description ?? '', t.kind ?? 'work', t.status ?? 'backlog', t.priority ?? 'medium', t.requirementId ?? null, t.botId ?? null, t.brief ?? '', t.targetDocSlug ?? null, t.output ?? null, t.progress ?? 0, J(t.dependsOn ?? []), J(t.log ?? []), t.createdAt ?? 0, J(t)],
     )
   }
@@ -88,7 +88,7 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
       `INSERT INTO bots (id, org_id, name, role, avatar_seed, status, charter, current_task_id, completed, created_at, raw)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        ON CONFLICT (id) DO UPDATE SET org_id=$2, name=$3, role=$4, avatar_seed=$5, status=$6, charter=$7, current_task_id=$8, completed=$9, raw=$11
-       WHERE COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((bots.raw->>'updatedAt')::bigint,0)`,
+       WHERE bots.org_id = $2 AND COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((bots.raw->>'updatedAt')::bigint,0)`,
       [b.id, orgId, b.name ?? '', b.role ?? '', b.avatarSeed ?? null, b.status ?? 'idle', J(b.charter ?? null), b.currentTaskId ?? null, b.completed ?? 0, b.createdAt ?? 0, J(b)],
     )
   }
@@ -108,7 +108,7 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
                   '{status}', '"done"'::jsonb),
                   '{output}', COALESCE(meetings.raw->'output','""'::jsonb))
            ELSE excluded.raw END
-       WHERE meetings.status <> 'running'`,
+       WHERE meetings.org_id = $2 AND meetings.status <> 'running'`,
       [m.id, orgId, m.projectId ?? null, m.productId ?? null, m.title ?? '', m.agenda ?? '', m.kind ?? 'kickoff', m.status ?? 'draft', J(m.participantBotIds ?? []), m.references ?? '', J(m.fullDocSlugs ?? []), !!m.parallel, m.rounds ?? 1, m.output ?? '', m.createdAt ?? 0, J(m)],
     )
   }
@@ -124,6 +124,29 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
       meetings: meetings.length,
     },
   }
+}
+
+const DELETE_TBL: Record<string, { tbl: string; idCol: string }> = {
+  projects: { tbl: 'projects', idCol: 'id' },
+  products: { tbl: 'products', idCol: 'id' },
+  requirements: { tbl: 'requirements', idCol: 'id' },
+  docs: { tbl: 'docs', idCol: 'slug' },
+  tasks: { tbl: 'tasks', idCol: 'id' },
+  bots: { tbl: 'bots', idCol: 'id' },
+  meetings: { tbl: 'meetings', idCol: 'id' },
+}
+
+/** 增量删除：按 org 隔离删除指定 id（增量同步用）。running 会议不删（服务端在跑）。 */
+export async function applyDeletes(orgId: string, deletes: Any): Promise<number> {
+  let n = 0
+  for (const [slice, ids] of Object.entries(deletes ?? {})) {
+    const spec = DELETE_TBL[slice]
+    if (!spec || !Array.isArray(ids) || ids.length === 0) continue
+    const guard = spec.tbl === 'meetings' ? " AND status <> 'running'" : ''
+    const r = await q(`DELETE FROM ${spec.tbl} WHERE ${spec.idCol} = ANY($1) AND org_id=$2${guard}`, [ids as string[], orgId])
+    n += (r as { rowCount?: number }).rowCount ?? 0
+  }
+  return n
 }
 
 /** 读取某账户组的全量领域数据，返回前端 store 形状 */
