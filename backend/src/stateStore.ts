@@ -43,14 +43,16 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
          raw = CASE
            WHEN COALESCE(excluded.raw -> 'workspace' ->> 'repoPath', '') <> '' THEN excluded.raw
            ELSE jsonb_set(excluded.raw, '{workspace}', COALESCE(projects.raw -> 'workspace', 'null'::jsonb), true)
-         END`,
+         END
+       WHERE COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((projects.raw->>'updatedAt')::bigint,0)`,
       [p.id, orgId, p.name ?? '', p.description ?? '', p.createdAt ?? 0, J(p)],
     )
   }
   for (const p of products) {
     await q(
       `INSERT INTO products (id, project_id, org_id, name, description, current_version, raw) VALUES ($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT (id) DO UPDATE SET project_id=$2, org_id=$3, name=$4, description=$5, current_version=$6, raw=$7`,
+       ON CONFLICT (id) DO UPDATE SET project_id=$2, org_id=$3, name=$4, description=$5, current_version=$6, raw=$7
+       WHERE COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((products.raw->>'updatedAt')::bigint,0)`,
       [p.id, p.projectId, orgId, p.name ?? '', p.description ?? '', p.currentVersion ?? 'v1.0.0', J(p)],
     )
   }
@@ -58,7 +60,8 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
     await q(
       `INSERT INTO requirements (id, product_id, org_id, title, description, content, priority, status, created_at, raw)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-       ON CONFLICT (id) DO UPDATE SET product_id=$2, org_id=$3, title=$4, description=$5, content=$6, priority=$7, status=$8, raw=$10`,
+       ON CONFLICT (id) DO UPDATE SET product_id=$2, org_id=$3, title=$4, description=$5, content=$6, priority=$7, status=$8, raw=$10
+       WHERE COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((requirements.raw->>'updatedAt')::bigint,0)`,
       [r.id, r.productId, orgId, r.title ?? '', r.description ?? '', r.content ?? '', r.priority ?? 'medium', r.status ?? 'draft', r.createdAt ?? 0, J(r)],
     )
   }
@@ -66,7 +69,8 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
     await q(
       `INSERT INTO docs (slug, product_id, org_id, title, type, owner_bot_id, requirement_id, relations, created_at, raw)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-       ON CONFLICT (slug) DO UPDATE SET product_id=$2, org_id=$3, title=$4, type=$5, owner_bot_id=$6, requirement_id=$7, relations=$8, raw=$10`,
+       ON CONFLICT (slug) DO UPDATE SET product_id=$2, org_id=$3, title=$4, type=$5, owner_bot_id=$6, requirement_id=$7, relations=$8, raw=$10
+       WHERE COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((docs.raw->>'updatedAt')::bigint,0)`,
       [d.slug, d.productId, orgId, d.title ?? '', d.type ?? 'prd', d.ownerBotId ?? null, d.requirementId ?? null, J(d.relations ?? []), d.createdAt ?? 0, J(d)],
     )
   }
@@ -74,7 +78,8 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
     await q(
       `INSERT INTO tasks (id, product_id, org_id, title, description, kind, status, priority, requirement_id, bot_id, brief, target_doc_slug, output, progress, depends_on, log, created_at, raw)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
-       ON CONFLICT (id) DO UPDATE SET product_id=$2, org_id=$3, title=$4, description=$5, kind=$6, status=$7, priority=$8, requirement_id=$9, bot_id=$10, brief=$11, target_doc_slug=$12, output=$13, progress=$14, depends_on=$15, log=$16, raw=$18`,
+       ON CONFLICT (id) DO UPDATE SET product_id=$2, org_id=$3, title=$4, description=$5, kind=$6, status=$7, priority=$8, requirement_id=$9, bot_id=$10, brief=$11, target_doc_slug=$12, output=$13, progress=$14, depends_on=$15, log=$16, raw=$18
+       WHERE COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((tasks.raw->>'updatedAt')::bigint,0)`,
       [t.id, t.productId, orgId, t.title ?? '', t.description ?? '', t.kind ?? 'work', t.status ?? 'backlog', t.priority ?? 'medium', t.requirementId ?? null, t.botId ?? null, t.brief ?? '', t.targetDocSlug ?? null, t.output ?? null, t.progress ?? 0, J(t.dependsOn ?? []), J(t.log ?? []), t.createdAt ?? 0, J(t)],
     )
   }
@@ -82,7 +87,8 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
     await q(
       `INSERT INTO bots (id, org_id, name, role, avatar_seed, status, charter, current_task_id, completed, created_at, raw)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-       ON CONFLICT (id) DO UPDATE SET org_id=$2, name=$3, role=$4, avatar_seed=$5, status=$6, charter=$7, current_task_id=$8, completed=$9, raw=$11`,
+       ON CONFLICT (id) DO UPDATE SET org_id=$2, name=$3, role=$4, avatar_seed=$5, status=$6, charter=$7, current_task_id=$8, completed=$9, raw=$11
+       WHERE COALESCE((excluded.raw->>'updatedAt')::bigint,0) >= COALESCE((bots.raw->>'updatedAt')::bigint,0)`,
       [b.id, orgId, b.name ?? '', b.role ?? '', b.avatarSeed ?? null, b.status ?? 'idle', J(b.charter ?? null), b.currentTaskId ?? null, b.completed ?? 0, b.createdAt ?? 0, J(b)],
     )
   }
@@ -90,7 +96,18 @@ export async function importSnapshot(orgId: string, snap: Any): Promise<{ counts
     await q(
       `INSERT INTO meetings (id, org_id, project_id, product_id, title, agenda, kind, status, participant_bot_ids, refs, full_doc_slugs, parallel, rounds, output, created_at, raw)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-       ON CONFLICT (id) DO UPDATE SET project_id=$3, product_id=$4, title=$5, agenda=$6, kind=$7, status=$8, participant_bot_ids=$9, refs=$10, full_doc_slugs=$11, parallel=$12, rounds=$13, output=$14, raw=$16
+       ON CONFLICT (id) DO UPDATE SET
+         project_id=$3, product_id=$4, title=$5, agenda=$6, kind=$7,
+         participant_bot_ids=$9, refs=$10, full_doc_slugs=$11, parallel=$12, rounds=$13,
+         -- 服务端权威：已结束(done)会议的 status/发言/纪要不被浏览器旧快照覆盖，只允许改元信息
+         status = CASE WHEN meetings.status='done' THEN 'done' ELSE excluded.status END,
+         output = CASE WHEN meetings.status='done' AND meetings.output<>'' THEN meetings.output ELSE excluded.output END,
+         raw = CASE WHEN meetings.status='done'
+           THEN jsonb_set(jsonb_set(jsonb_set(excluded.raw,
+                  '{messages}', COALESCE(meetings.raw->'messages','[]'::jsonb)),
+                  '{status}', '"done"'::jsonb),
+                  '{output}', COALESCE(meetings.raw->'output','""'::jsonb))
+           ELSE excluded.raw END
        WHERE meetings.status <> 'running'`,
       [m.id, orgId, m.projectId ?? null, m.productId ?? null, m.title ?? '', m.agenda ?? '', m.kind ?? 'kickoff', m.status ?? 'draft', J(m.participantBotIds ?? []), m.references ?? '', J(m.fullDocSlugs ?? []), !!m.parallel, m.rounds ?? 1, m.output ?? '', m.createdAt ?? 0, J(m)],
     )

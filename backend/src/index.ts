@@ -310,6 +310,7 @@ app.post('/api/import', requireAuth, async (req: AuthedRequest, res) => {
   if (!dbEnabled) return res.status(503).json({ error: '云端存储未启用' })
   try {
     const result = await importSnapshot(req.auth!.user.orgId, req.body?.snapshot ?? {})
+    notifyOrg(req.auth!.user.orgId, 'state') // 通知同 org 其他客户端重拉领域数据，实现多端收敛
     res.json({ ok: true, ...result })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })

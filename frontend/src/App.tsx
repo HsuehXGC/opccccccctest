@@ -5,7 +5,7 @@ import { useAuth } from './store/useAuth'
 import { Avatar, cx } from './lib/ui'
 import { Toaster } from './lib/toast'
 import { CommandPalette } from './components/CommandPalette'
-import { bootstrapCloud, startAutoSync } from './lib/cloudBridge'
+import { bootstrapCloud, startAutoSync, rehydrate } from './lib/cloudBridge'
 import { applyJobs } from './lib/cloudJobs'
 import { connectBus, onCloudChange } from './lib/cloudBus'
 import { authApi } from './lib/authApi'
@@ -72,8 +72,14 @@ export function App() {
     const poll = () => authApi.listJobs(authToken, {}).then((r) => alive && applyJobs(r.jobs)).catch(() => {})
     poll()
     connectBus()
+    let lastRehydrate = 0
     const off = onCloudChange((kind) => {
       if (kind === 'jobs' || kind === 'state') poll()
+      // 多端收敛：其他端改了领域数据 → 重拉，避免本端攥旧快照回推覆盖（节流 1.5s）
+      if (kind === 'state' && Date.now() - lastRehydrate > 1500) {
+        lastRehydrate = Date.now()
+        void rehydrate(authToken)
+      }
     })
     const id = setInterval(poll, 15000) // WS 为主，轮询兜底
     return () => {

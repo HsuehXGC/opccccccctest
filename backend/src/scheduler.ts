@@ -37,7 +37,10 @@ async function onTaskDone(job: Job, output: string): Promise<void> {
   if (job.ref_type !== 'task' || !job.ref_id) return
   await q(
     `UPDATE tasks SET output=$2, status='review', progress=100,
-       log = (COALESCE(log,'[]'::jsonb) || $3::jsonb) WHERE id=$1`,
+       log = (COALESCE(log,'[]'::jsonb) || $3::jsonb),
+       raw = jsonb_set(jsonb_set(COALESCE(raw,'{}'::jsonb),'{status}','"review"'::jsonb),
+                       '{updatedAt}', to_jsonb((extract(epoch from now())*1000)::bigint))
+     WHERE id=$1`,
     [job.ref_id, output, JSON.stringify(['✓ 云端执行完成，待复核'])],
   )
   await q(`UPDATE bots SET status='idle', current_task_id=NULL, completed=completed+1
@@ -47,7 +50,10 @@ async function onTaskDone(job: Job, output: string): Promise<void> {
 async function onTaskError(job: Job): Promise<void> {
   if (job.ref_type !== 'task' || !job.ref_id) return
   await q(`UPDATE tasks SET status='backlog',
-             log = (COALESCE(log,'[]'::jsonb) || $2::jsonb) WHERE id=$1`,
+             log = (COALESCE(log,'[]'::jsonb) || $2::jsonb),
+             raw = jsonb_set(jsonb_set(COALESCE(raw,'{}'::jsonb),'{status}','"backlog"'::jsonb),
+                             '{updatedAt}', to_jsonb((extract(epoch from now())*1000)::bigint))
+           WHERE id=$1`,
     [job.ref_id, JSON.stringify(['✗ 云端执行失败，已退回待办'])])
   await q(`UPDATE bots SET status='idle', current_task_id=NULL
            WHERE id=(SELECT bot_id FROM tasks WHERE id=$1)`, [job.ref_id])
