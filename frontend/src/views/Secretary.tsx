@@ -9,7 +9,7 @@ import type { DocType, Priority, MeetingKind } from '../types'
 
 type Msg = { id: string; role: string; content: string; created_at: number }
 
-const DOC_TYPES: DocType[] = ['vision', 'prd', 'story', 'arch', 'api', 'data', 'design', 'adr', 'test', 'release']
+const DOC_TYPES: DocType[] = ['brainstorm', 'note', 'research', 'vision', 'prd', 'story', 'arch', 'api', 'data', 'design', 'adr', 'test', 'release']
 type DocProposal = { title: string; type: DocType; product: string; content: string }
 type Action =
   | { kind: 'backlog_add'; project: string; product: string; title: string; brief: string; priority: string }

@@ -74,7 +74,7 @@ const SECRETARY_SYSTEM = [
   '当老板想把讨论/想法沉淀成文档时（明确说「整理成文档/写成 PRD/记下来/出个方案」等），在你本轮回复的**最后**追加一个文档草案块——前面照常写你的对话总结。格式严格如下：',
   '===DOC===',
   'TITLE: <简洁标题>',
-  'TYPE: <从 vision|prd|story|arch|api|data|design|adr|test|release 里选最贴切的一个>',
+  'TYPE: <从 brainstorm|note|research|vision|prd|story|arch|api|data|design|adr|test|release 里选最贴切的一个；立项前的构想/发散用 brainstorm(头脑风暴)、note(笔记)、research(调研)>',
   'PRODUCT: <从【组织简报】列出的产品/模块名里选一个最合适的目标；拿不准就选最相关的>',
   '===CONTENT===',
   '<完整 markdown 正文，结构清晰、可直接作为正式文档，不要再解释>',

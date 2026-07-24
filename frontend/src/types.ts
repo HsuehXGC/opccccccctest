@@ -138,6 +138,9 @@ export interface Task {
 
 // 覆盖产品生命周期五阶段的文档类型。核心类型每个产品默认应有，可选类型按需启用。
 export type DocType =
+  | 'brainstorm' // ⓪ 构想 · 头脑风暴（立项前）
+  | 'note' // ⓪ 构想 · 笔记（立项前）
+  | 'research' // ⓪ 构想 · 调研（立项前）
   | 'vision' // ① 定义 · 愿景/业务目标(BRD)
   | 'prd' // ② 规划 · 产品需求
   | 'story' // ② 规划 · 用户故事
@@ -150,7 +153,7 @@ export type DocType =
   | 'release' // ⑤ 发布 · 发布说明
 
 /** 生命周期阶段 */
-export type DocPhase = 'define' | 'plan' | 'design' | 'verify' | 'release'
+export type DocPhase = 'ideate' | 'define' | 'plan' | 'design' | 'verify' | 'release'
 
 export type DocStatus = 'draft' | 'review' | 'approved' | 'archived'
 

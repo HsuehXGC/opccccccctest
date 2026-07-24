@@ -30,6 +30,7 @@ export const BOT_STATUS: Record<BotStatus, { label: string; dot: string; text: s
 
 // ── 生命周期阶段 ───────────────────────
 export const DOC_PHASE: { key: DocPhase; label: string; index: string }[] = [
+  { key: 'ideate', label: '构想', index: '⓪' },
   { key: 'define', label: '定义', index: '①' },
   { key: 'plan', label: '规划', index: '②' },
   { key: 'design', label: '设计', index: '③' },
@@ -41,6 +42,9 @@ export const DOC_PHASE: { key: DocPhase; label: string; index: string }[] = [
 // core=true 为每个产品默认应有的核心文档；其余为按需启用的可选文档。
 type DocTypeMeta = { label: string; abbr: string; phase: DocPhase; core: boolean; cls: string; chip: string }
 export const DOC_TYPE: Record<DocType, DocTypeMeta> = {
+  brainstorm: { label: '头脑风暴', abbr: 'IDEA', phase: 'ideate', core: false, cls: 'text-orange-600', chip: 'bg-orange-100 text-orange-700' },
+  note: { label: '笔记', abbr: 'NOTE', phase: 'ideate', core: false, cls: 'text-slate-600', chip: 'bg-slate-100 text-slate-700' },
+  research: { label: '调研', abbr: 'RSCH', phase: 'ideate', core: false, cls: 'text-fuchsia-600', chip: 'bg-fuchsia-100 text-fuchsia-700' },
   vision: { label: '愿景/BRD', abbr: 'BRD', phase: 'define', core: false, cls: 'text-rose-600', chip: 'bg-rose-100 text-rose-700' },
   prd: { label: '产品需求', abbr: 'PRD', phase: 'plan', core: true, cls: 'text-indigo-600', chip: 'bg-indigo-100 text-indigo-700' },
   story: { label: '用户故事', abbr: 'STORY', phase: 'plan', core: false, cls: 'text-sky-600', chip: 'bg-sky-100 text-sky-700' },
@@ -54,7 +58,7 @@ export const DOC_TYPE: Record<DocType, DocTypeMeta> = {
 }
 
 /** 界面中文档类型的展示顺序（按生命周期） */
-export const DOC_TYPE_ORDER: DocType[] = ['vision', 'prd', 'story', 'arch', 'api', 'data', 'design', 'adr', 'test', 'release']
+export const DOC_TYPE_ORDER: DocType[] = ['brainstorm', 'note', 'research', 'vision', 'prd', 'story', 'arch', 'api', 'data', 'design', 'adr', 'test', 'release']
 
 // ── 类型化关系 ─────────────────────────
 export const REL: Record<RelType, { label: string; cls: string }> = {
