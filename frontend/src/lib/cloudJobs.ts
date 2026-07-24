@@ -39,6 +39,7 @@ function applyDocJobs(jobs: CloudJob[]): void {
     if (j.status !== 'done' || !j.ref_id) continue
     if (st.docs.some((d) => d.slug === j.ref_id)) continue
     if (st.deletedDocSlugs.includes(j.ref_id)) continue // 用户已删，别据 done job 复活
+    if (/===NEED_INPUT===/.test(j.output || '')) continue // 撰写员要求补充信息，别建成半成品文档（在会议撰写弹窗里提示用户）
     const m = (j.meta ?? {}) as Record<string, unknown>
     if (!m.productId) continue
     st.addDoc({

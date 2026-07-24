@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { Users, Plus, Play, Loader2, Send, Sparkles, Trash2, FileText, ArrowLeft, Bot as BotIcon, ClipboardList, ListPlus } from 'lucide-react'
+import { Users, Plus, Play, Loader2, Send, Sparkles, Trash2, FileText, ArrowLeft, Bot as BotIcon, ClipboardList, ListPlus, AlertTriangle } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useAuth } from '../store/useAuth'
 import { authApi } from '../lib/authApi'
@@ -651,6 +651,48 @@ function AuthorDocsModal({
   const [productId, setProductId] = useState<string | null>(defaultProductId)
   const [running, setRunning] = useState(false)
   const [created, setCreated] = useState<{ slug: string; title: string }[]>([])
+  const [jobInfo, setJobInfo] = useState<Record<string, { status: string; output: string }>>({}) // slug → job 状态+产出
+  const [noExec, setNoExec] = useState(false) // 当前 org 无在线执行器
+  const [supp, setSupp] = useState<Record<string, string>>({}) // slug → 用户补充信息草稿
+
+  // 打开期间轮询：在线执行器 + 已入队文档的真实 job 状态与产出（实时进度）
+  useEffect(() => {
+    if (!token) return
+    let alive = true
+    const poll = async () => {
+      try {
+        const m = await authApi.machines(token)
+        if (alive) setNoExec(!m.machines.some((x) => x.online))
+        if (created.length) {
+          const slugs = new Set(created.map((c) => c.slug))
+          const { jobs } = await authApi.listJobs(token, { refType: 'doc' })
+          if (!alive) return
+          const st: Record<string, { status: string; output: string }> = {}
+          for (const j of jobs) if (j.ref_id && slugs.has(j.ref_id)) st[j.ref_id] = { status: j.status, output: j.output }
+          setJobInfo(st)
+        }
+      } catch { /* 下次再试 */ }
+    }
+    poll()
+    const id = setInterval(poll, 4000)
+    return () => { alive = false; clearInterval(id) }
+  }, [token, created])
+
+  // 重新撰写某篇（用同一 slug 再入队；带上用户补充信息）
+  async function rerun(item: ReturnType<typeof parseDocManifest>[number], slug: string) {
+    if (!token || !product) return
+    const bot = resolveBot(item.ownerRole)
+    let prompt = docAuthorPrompt(bot ?? orgBots[0], meeting, product, knowledge, item)
+    const extra = (supp[slug] ?? '').trim()
+    if (extra) prompt += `\n\n【用户补充信息，据此完成撰写，不要再要求补充】\n${extra}`
+    try {
+      await authApi.enqueueJobs(token, [{ kind: 'doc_author', refType: 'doc', refId: slug, title: item.title, prompt, meta: { slug, title: item.title, type: item.type, productId, productVersion: product?.currentVersion, ownerBotId: bot?.id ?? null } }])
+      setJobInfo((s) => ({ ...s, [slug]: { status: 'queued', output: '' } }))
+      toast('已重新入队撰写', 'success')
+    } catch (e) {
+      toast('重试失败：' + (e as Error).message, 'warn')
+    }
+  }
 
   const product = products.find((p) => p.id === productId)
   const n = checked.filter(Boolean).length
@@ -706,45 +748,55 @@ function AuthorDocsModal({
               ))}
             </select>
           </Field>
+          {created.length > 0 && noExec && (
+            <div className="mb-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700 ring-1 ring-amber-200">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              <span>当前账户组<b>没有在线执行器</b>，文档已排队但尚未开始撰写。去「团队与账户 → 本地算力」绑定一台电脑，agent 上线后会自动开写。</span>
+            </div>
+          )}
           <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">要撰写的文档 · {n}/{items.length}</div>
-          <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
+          <div className="max-h-72 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
             {items.map((it, i) => {
               const bot = resolveBot(it.ownerRole)
               const enq = created.find((c) => c.title === it.title)
-              const madeDoc = enq && allDocs.find((d) => d.slug === enq.slug)
+              const slug = enq?.slug
+              const info = slug ? jobInfo[slug] : undefined
+              const madeDoc = slug ? allDocs.find((d) => d.slug === slug) : undefined
+              const needMsg = info?.status === 'done' && /===NEED_INPUT===/.test(info.output || '') ? (info.output.split('===NEED_INPUT===')[1] || '').trim().slice(0, 400) : null
+              const status = madeDoc ? 'done' : needMsg ? 'need_input' : info?.status ?? (enq ? 'queued' : null)
               return (
-                <label key={i} className="flex cursor-pointer items-start gap-2 rounded px-1.5 py-1 text-sm hover:bg-slate-50">
-                  <input
-                    type="checkbox"
-                    checked={checked[i]}
-                    disabled={running || !!enq}
-                    onChange={() => setChecked((c) => c.map((v, j) => (j === i ? !v : v)))}
-                    className="mt-1 accent-brand"
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="font-medium">{it.title}</span>
-                    <span className="ml-1.5 rounded bg-slate-100 px-1 text-[10px] text-slate-500">{DOC_TYPE[it.type]?.label ?? it.type}</span>
-                    <span className="ml-1 text-[11px] text-slate-400">· {bot?.name ?? '?'}（{it.ownerRole}）</span>
-                    {madeDoc ? (
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault()
-                          onClose()
-                          if (productId) openDoc(productId, enq!.slug)
-                        }}
-                        className="ml-1.5 text-[11px] font-medium text-emerald-600 hover:underline"
-                      >
-                        ✓ 已写成，查看
-                      </button>
-                    ) : enq ? (
-                      <span className="ml-1.5 text-[11px] text-brand">云端撰写中…</span>
-                    ) : null}
-                  </span>
-                </label>
+                <div key={i} className="rounded px-1.5 py-1 text-sm hover:bg-slate-50">
+                  <div className="flex items-start gap-2">
+                    <input type="checkbox" checked={checked[i]} disabled={running || !!enq} onChange={() => setChecked((c) => c.map((v, j) => (j === i ? !v : v)))} className="mt-1 accent-brand" />
+                    <span className="min-w-0 flex-1">
+                      <span className="font-medium">{it.title}</span>
+                      <span className="ml-1.5 rounded bg-slate-100 px-1 text-[10px] text-slate-500">{DOC_TYPE[it.type]?.label ?? it.type}</span>
+                      <span className="ml-1 text-[11px] text-slate-400">· {bot?.name ?? '?'}（{it.ownerRole}）</span>
+                      {status === 'done' ? (
+                        <button onClick={() => { onClose(); if (productId && slug) openDoc(productId, slug) }} className="ml-1.5 text-[11px] font-medium text-emerald-600 hover:underline">✓ 已写成，查看</button>
+                      ) : status === 'running' ? (
+                        <span className="ml-1.5 inline-flex items-center gap-1 text-[11px] text-brand"><Loader2 size={11} className="animate-spin" /> 撰写中…</span>
+                      ) : status === 'queued' ? (
+                        <span className="ml-1.5 text-[11px] text-slate-400">{noExec ? '排队中 · 等执行器' : '排队中…'}</span>
+                      ) : status === 'error' ? (
+                        <span className="ml-1.5 text-[11px] font-medium text-rose-600">✗ 撰写失败</span>
+                      ) : status === 'need_input' ? (
+                        <span className="ml-1.5 text-[11px] font-medium text-amber-600">⚠ 需你补充信息</span>
+                      ) : null}
+                    </span>
+                  </div>
+                  {slug && (status === 'need_input' || status === 'error') && (
+                    <div className="ml-6 mt-1 rounded-md bg-amber-50/70 p-2 ring-1 ring-amber-200">
+                      {needMsg && <p className="mb-1 whitespace-pre-wrap text-[11px] text-amber-800">{needMsg}</p>}
+                      <textarea value={supp[slug] ?? ''} onChange={(e) => setSupp((s) => ({ ...s, [slug]: e.target.value }))} placeholder={status === 'need_input' ? '补充上面缺的信息，然后重写…' : '可补充提示后重试…'} className="mb-1 h-14 w-full resize-y rounded border border-amber-200 bg-white px-2 py-1 text-[12px] outline-none focus:border-amber-400" />
+                      <button onClick={() => rerun(it, slug)} className="rounded bg-amber-500 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-amber-600">补充并重写</button>
+                    </div>
+                  )}
+                </div>
               )
             })}
           </div>
-          <p className="mt-2 text-[11px] text-slate-400">每篇入队云端由对应角色撰写——关页面也不影响，写好自动进文档中心。</p>
+          <p className="mt-2 text-[11px] text-slate-400">每篇入队云端由对应角色撰写——关页面也不影响，进度实时更新，写好自动进文档中心。</p>
         </>
       )}
       <div className="mt-4 flex justify-end gap-2">
