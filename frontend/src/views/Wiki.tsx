@@ -15,6 +15,8 @@ import {
   CircleDashed,
   LayoutGrid,
   Trash2,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { Avatar, DOC_STATUS, DOC_TYPE, DOC_TYPE_ORDER, REL, REL_INVERSE, cx } from '../lib/ui'
@@ -174,7 +176,7 @@ function RelationsPanel({
 }
 
 // ── 编辑 / 修订：页面内大编辑器，保存即生成新版本 ───────────────────────
-function DocEditor({ doc, bots, onClose }: { doc: WikiDoc; bots: Bot[]; onClose: () => void }) {
+function DocEditor({ doc, bots, titleBySlug, onClose }: { doc: WikiDoc; bots: Bot[]; titleBySlug: Map<string, string>; onClose: () => void }) {
   const saveDocVersion = useStore((s) => s.saveDocVersion)
   const cur = doc.versions[0]
   const [content, setContent] = useState(cur.content)
@@ -182,52 +184,63 @@ function DocEditor({ doc, bots, onClose }: { doc: WikiDoc; bots: Bot[]; onClose:
   const [productVersion, setProductVersion] = useState(cur.productVersion)
   const [status, setStatus] = useState<DocStatus>(cur.status)
   const [ownerBotId, setOwnerBotId] = useState<string | null>(doc.ownerBotId)
+  const [full, setFull] = useState(false)
 
   function save() {
-    saveDocVersion(doc.slug, {
-      content,
-      note: note.trim() || '更新内容',
-      authorBotId: ownerBotId,
-      productVersion,
-      status,
-    })
+    saveDocVersion(doc.slug, { content, note: note.trim() || '更新内容', authorBotId: ownerBotId, productVersion, status })
     onClose()
   }
   const sel = 'rounded-md border border-slate-200 bg-white px-2 py-1 text-xs outline-none focus:border-brand'
-
-  return (
-    <div className="flex h-full flex-col">
-      {/* 工具条 */}
-      <div className="border-b border-slate-200 bg-white/80 px-6 py-2.5 backdrop-blur">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-700"><PenLine size={14} className="text-brand" /> 修订 · {doc.title}</span>
-          <span className="text-[11px] text-slate-400">{cur.version} → 新版本</span>
-          <div className="ml-auto flex items-center gap-2">
-            <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-100">取消</button>
-            <button onClick={save} className="rounded-lg bg-brand px-3.5 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">保存 <span className="opacity-60">⌘S</span></button>
-          </div>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <select className={sel} value={status} onChange={(e) => setStatus(e.target.value as DocStatus)}>
-            {DOC_STATUSES.map((s) => <option key={s} value={s}>{DOC_STATUS[s].label}</option>)}
-          </select>
-          <input className={cx(sel, 'w-24')} value={productVersion} onChange={(e) => setProductVersion(e.target.value)} placeholder="产品版本" />
-          <select className={sel} value={ownerBotId ?? ''} onChange={(e) => setOwnerBotId(e.target.value || null)}>
-            <option value="">未指派负责人</option>
-            {bots.map((b) => <option key={b.id} value={b.id}>{b.name} · {b.role}</option>)}
-          </select>
-          <input className={cx(sel, 'min-w-0 flex-1')} value={note} onChange={(e) => setNote(e.target.value)} placeholder="修改说明（本次改了什么，可选）" />
+  const editArea = (cls: string) => (
+    <textarea autoFocus value={content} onChange={(e) => setContent(e.target.value)} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save() } }} placeholder="用 Markdown 写，[[slug]] 关联其它文档…" className={cls} />
+  )
+  const toolbar = (
+    <div className="shrink-0 border-b border-slate-200 bg-white/80 px-6 py-2.5 backdrop-blur">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-700"><PenLine size={14} className="text-brand" /> 修订 · {doc.title}</span>
+        <span className="text-[11px] text-slate-400">{cur.version} → 新版本</span>
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={() => setFull((v) => !v)} title={full ? '退出全屏' : '全屏 · 左编辑右预览'} className="rounded-lg px-2 py-1.5 text-slate-500 hover:bg-slate-100">
+            {full ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </button>
+          <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-100">取消</button>
+          <button onClick={save} className="rounded-lg bg-brand px-3.5 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">保存 <span className="opacity-60">⌘S</span></button>
         </div>
       </div>
-      {/* 大编辑区：占满剩余高度 */}
-      <textarea
-        autoFocus
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save() } }}
-        placeholder="用 Markdown 写，[[slug]] 关联其它文档…"
-        className="min-h-0 w-full flex-1 resize-none bg-transparent px-8 py-6 font-mono text-[13px] leading-relaxed text-slate-700 outline-none"
-      />
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select className={sel} value={status} onChange={(e) => setStatus(e.target.value as DocStatus)}>
+          {DOC_STATUSES.map((s) => <option key={s} value={s}>{DOC_STATUS[s].label}</option>)}
+        </select>
+        <input className={cx(sel, 'w-24')} value={productVersion} onChange={(e) => setProductVersion(e.target.value)} placeholder="产品版本" />
+        <select className={sel} value={ownerBotId ?? ''} onChange={(e) => setOwnerBotId(e.target.value || null)}>
+          <option value="">未指派负责人</option>
+          {bots.map((b) => <option key={b.id} value={b.id}>{b.name} · {b.role}</option>)}
+        </select>
+        <input className={cx(sel, 'min-w-0 flex-1')} value={note} onChange={(e) => setNote(e.target.value)} placeholder="修改说明（本次改了什么，可选）" />
+      </div>
+    </div>
+  )
+
+  // 全屏：左 Markdown 编辑 · 右实时预览
+  if (full) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col bg-white">
+        {toolbar}
+        <div className="flex min-h-0 flex-1">
+          {editArea('min-h-0 w-1/2 resize-none border-r border-slate-200 bg-slate-50/40 px-6 py-5 font-mono text-[13px] leading-relaxed text-slate-700 outline-none')}
+          <div className="w-1/2 overflow-y-auto px-8 py-5">
+            {content.trim()
+              ? <WikiContent content={content} titleBySlug={titleBySlug} onNavigate={() => {}} />
+              : <p className="text-sm text-slate-300">右侧实时预览——在左边写 Markdown…</p>}
+          </div>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="flex h-full flex-col">
+      {toolbar}
+      {editArea('min-h-0 w-full flex-1 resize-none bg-transparent px-8 py-6 font-mono text-[13px] leading-relaxed text-slate-700 outline-none')}
     </div>
   )
 }
@@ -546,7 +559,7 @@ export function Wiki() {
             <p className="text-sm">从左侧「文档蓝图」起草核心文档，或点「新建」。</p>
           </div>
         ) : editing ? (
-          <DocEditor doc={doc} bots={bots} onClose={() => setEditing(false)} />
+          <DocEditor doc={doc} bots={bots} titleBySlug={titleBySlug} onClose={() => setEditing(false)} />
         ) : (
           <DocDetail
             doc={doc}
