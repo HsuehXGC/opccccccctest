@@ -50,6 +50,7 @@ function applyDocJobs(jobs: CloudJob[]): void {
       productVersion: (m.productVersion as string) || 'v1.0.0',
       requirementId: null,
       ownerBotId: (m.ownerBotId as string) ?? null,
+      sourceMeetingId: (m.meetingId as string) ?? null,
       content: j.output || `# ${(m.title as string) || j.title}\n\n（未产出内容）`,
     })
   }

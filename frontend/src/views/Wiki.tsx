@@ -17,6 +17,9 @@ import {
   Trash2,
   Maximize2,
   Minimize2,
+  MessagesSquare,
+  Target,
+  KanbanSquare,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { Avatar, DOC_STATUS, DOC_TYPE, DOC_TYPE_ORDER, REL, REL_INVERSE, cx } from '../lib/ui'
@@ -695,6 +698,16 @@ function DocDetail({
   const cur = doc.versions[0]
   const shown = previewVersion ? doc.versions.find((v) => v.version === previewVersion)! : cur
   const owner = doc.ownerBotId ? botById.get(doc.ownerBotId) : null
+  // 关联：会议出处 / 需求（可建可取消）/ 任务（任务侧维护，这里展示可跳转）
+  const meetings = useStore((s) => s.meetings)
+  const requirements = useStore((s) => s.requirements)
+  const tasks = useStore((s) => s.tasks)
+  const setDocRequirement = useStore((s) => s.setDocRequirement)
+  const openMeeting = useStore((s) => s.openMeeting)
+  const openTask = useStore((s) => s.openTask)
+  const srcMeeting = doc.sourceMeetingId ? meetings.find((m) => m.id === doc.sourceMeetingId) : null
+  const productReqs = requirements.filter((r) => r.productId === doc.productId)
+  const linkedTasks = tasks.filter((t) => t.targetDocSlug === doc.slug)
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-7">
@@ -741,6 +754,48 @@ function DocDetail({
           </span>
           <span className="text-slate-300">·</span>
           <span className="font-mono text-slate-400">{doc.slug}</span>
+        </div>
+
+        {/* 关联：会议出处 / 需求（建·取消）/ 任务 */}
+        <div className="mt-2.5 flex flex-wrap items-center gap-2 text-xs">
+          {srcMeeting && (
+            <button
+              onClick={() => openMeeting(srcMeeting.id)}
+              title="跳到出处会议"
+              className="inline-flex items-center gap-1 rounded-md bg-brand-soft px-2 py-1 font-medium text-brand ring-1 ring-brand/20 hover:bg-brand/10"
+            >
+              <MessagesSquare size={12} /> 来自会议《{srcMeeting.title}》
+            </button>
+          )}
+          <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-slate-500">
+            <Target size={12} /> 关联需求
+            <select
+              value={doc.requirementId ?? ''}
+              onChange={(e) => setDocRequirement(doc.slug, e.target.value || null)}
+              className="max-w-44 truncate bg-transparent font-medium text-slate-700 outline-none"
+            >
+              <option value="">未关联（点此建立）</option>
+              {productReqs.map((r) => (
+                <option key={r.id} value={r.id}>{r.title}</option>
+              ))}
+            </select>
+            {doc.requirementId && (
+              <button onClick={() => setDocRequirement(doc.slug, null)} title="取消关联" className="ml-0.5 text-slate-400 hover:text-rose-500">
+                <X size={12} />
+              </button>
+            )}
+          </span>
+          {linkedTasks.length > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-slate-500">
+              <KanbanSquare size={12} /> 关联任务
+              {linkedTasks.slice(0, 4).map((t) => (
+                <button key={t.id} onClick={() => openTask(t.id)} title="打开任务" className="ml-0.5 max-w-32 truncate font-medium text-slate-700 hover:text-brand hover:underline">
+                  {t.title}
+                </button>
+              ))}
+              {linkedTasks.length > 4 && <span>+{linkedTasks.length - 4}</span>}
+            </span>
+          )}
         </div>
 
         <div className="mt-3 flex gap-2">

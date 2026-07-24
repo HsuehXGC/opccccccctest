@@ -98,6 +98,10 @@ interface State {
   focusTaskId: string | null
   openTask: (taskId: string) => void
   clearFocusTask: () => void
+  /** 请求会议页打开某会议详情（从文档"会议出处"跳转用） */
+  focusMeetingId: string | null
+  openMeeting: (meetingId: string) => void
+  clearFocusMeeting: () => void
   /** 云端有「排队中/运行中」job 的 refId（任务/文档）——避免重复入队；瞬态不持久化 */
   activeJobRefs: string[]
   setActiveJobRefs: (refs: string[]) => void
@@ -184,6 +188,7 @@ interface State {
     ownerBotId: string | null
     relations?: DocRelation[]
     content?: string
+    sourceMeetingId?: string | null
   }) => void
   /** 增删文档间的类型化关系 */
   addRelation: (slug: string, relation: DocRelation) => void
@@ -198,6 +203,8 @@ interface State {
   rollbackDoc: (slug: string, version: string) => void
   /** 删除文档（用户可删自己的笔记等）；同步会真删云端 */
   deleteDoc: (slug: string) => void
+  /** 建立/取消文档与需求的关联（requirementId=null 即取消） */
+  setDocRequirement: (slug: string, requirementId: string | null) => void
   /** 本会话内已删文档的 slug：防止 applyDocJobs 在删除同步落地前据 done job 复活它 */
   deletedDocSlugs: string[]
 
@@ -315,6 +322,13 @@ export const useStore = create<State>()(
       return { view: 'kanban', focusTaskId: taskId, currentProjectId: prod?.projectId ?? s.currentProjectId }
     }),
   clearFocusTask: () => set({ focusTaskId: null }),
+  focusMeetingId: null,
+  openMeeting: (meetingId) =>
+    set((s) => {
+      const m = s.meetings.find((x) => x.id === meetingId)
+      return { view: 'meetings', focusMeetingId: meetingId, currentProjectId: m?.projectId ?? s.currentProjectId }
+    }),
+  clearFocusMeeting: () => set({ focusMeetingId: null }),
   activeJobRefs: [],
   setActiveJobRefs: (refs) =>
     set((s) => (s.activeJobRefs.length === refs.length && s.activeJobRefs.every((r, i) => r === refs[i]) ? {} : { activeJobRefs: refs })),
@@ -608,7 +622,7 @@ export const useStore = create<State>()(
     set((s) => ({ meetings: s.meetings.map((m) => (m.id === meetingId ? { ...m, ...patch } : m)) })),
   removeMeeting: (meetingId) => set((s) => ({ meetings: s.meetings.filter((m) => m.id !== meetingId) })),
 
-  addDoc: ({ slug, title, type, productId, productVersion, requirementId, ownerBotId, relations, content }) =>
+  addDoc: ({ slug, title, type, productId, productVersion, requirementId, ownerBotId, relations, content, sourceMeetingId }) =>
     set((s) => {
       if (s.docs.some((d) => d.slug === slug)) return s
       const doc: WikiDoc = {
@@ -618,6 +632,7 @@ export const useStore = create<State>()(
         productId,
         ownerBotId,
         requirementId,
+        sourceMeetingId: sourceMeetingId ?? null,
         relations: relations ?? [],
         versions: [
           {
@@ -683,6 +698,9 @@ export const useStore = create<State>()(
       deletedDocSlugs: s.deletedDocSlugs.includes(slug) ? s.deletedDocSlugs : [...s.deletedDocSlugs, slug],
       focusDoc: s.focusDoc?.slug === slug ? null : s.focusDoc,
     })),
+
+  setDocRequirement: (slug, requirementId) =>
+    set((s) => ({ docs: s.docs.map((d) => (d.slug === slug ? { ...d, requirementId } : d)) })),
 
   rollbackDoc: (slug, version) =>
     set((s) => ({

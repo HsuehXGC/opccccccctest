@@ -719,7 +719,7 @@ function AuthorDocsModal({
           refId: slug,
           title: item.title,
           prompt: docAuthorPrompt(bot ?? orgBots[0], meeting, product, knowledge, item),
-          meta: { slug, title: item.title, type: item.type, productId, productVersion: product.currentVersion, ownerBotId: bot?.id ?? null },
+          meta: { slug, title: item.title, type: item.type, productId, productVersion: product.currentVersion, ownerBotId: bot?.id ?? null, meetingId: meeting.id },
         }
       })
       await authApi.enqueueJobs(token, jobs)
@@ -833,6 +833,16 @@ export function Meetings() {
 
   const [creating, setCreating] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
+
+  // 从文档「会议出处」跳转：自动打开对应会议详情
+  const focusMeetingId = useStore((s) => s.focusMeetingId)
+  const clearFocusMeeting = useStore((s) => s.clearFocusMeeting)
+  useEffect(() => {
+    if (focusMeetingId) {
+      setOpenId(focusMeetingId)
+      clearFocusMeeting()
+    }
+  }, [focusMeetingId, clearFocusMeeting])
 
   if (openId && projectMeetings.some((m) => m.id === openId)) {
     return <MeetingRoom meetingId={openId} onBack={() => setOpenId(null)} />

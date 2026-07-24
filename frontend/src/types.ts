@@ -197,6 +197,8 @@ export interface WikiDoc {
   ownerBotId: string | null
   /** 可选：关联的企业需求 */
   requirementId: string | null
+  /** 可选：出处会议——若本文档由某会议（文档撰写会）产出，记录会议 id，供追溯 */
+  sourceMeetingId?: string | null
   /** 类型化关系（结构化上下游，蓝图/工作流用）。正文内的 [[slug]] 仍作为阅读用的通用引用。 */
   relations: DocRelation[]
   /** 版本快照，index 0 为当前版本（newest first） */
