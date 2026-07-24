@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { UserPlus, Terminal, FileText, Wrench, Lock, X, GitBranch, Plus, ExternalLink, ClipboardList, Rocket, Loader2, Cpu, Sparkles, Check } from 'lucide-react'
+import { UserPlus, Terminal, FileText, Wrench, Lock, X, GitBranch, Plus, ExternalLink, ClipboardList, Rocket, Loader2, Cpu, Sparkles, Check, AlertTriangle } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useAuth } from '../store/useAuth'
 import { authApi, runExecutorStream, type LiveMachine } from '../lib/authApi'
@@ -1041,8 +1041,21 @@ export function Kanban() {
   const allProducts = useStore((s) => s.products)
   const currentProjectId = useStore((s) => s.currentProjectId)
   const tasks = useStore((s) => s.tasks)
+  const activeJobRefs = useStore((s) => s.activeJobRefs)
+  const token = useAuth((s) => s.token)
   const [productFilter, setProductFilter] = useState<string>('all')
   const [openId, setOpenId] = useState<string | null>(null)
+  const [noExec, setNoExec] = useState(false) // 当前账户组无在线执行器
+
+  // 轮询在线执行器：有云端排队/在跑任务但没执行器时，明确提示用户（否则任务静默排队不动）
+  useEffect(() => {
+    if (!token) return
+    let alive = true
+    const poll = () => authApi.machines(token).then((r) => alive && setNoExec(!r.machines.some((m) => m.online))).catch(() => {})
+    poll()
+    const id = setInterval(poll, 6000)
+    return () => { alive = false; clearInterval(id) }
+  }, [token])
 
   // 命令面板等跨模块跳转：自动打开目标任务抽屉
   const focusTaskId = useStore((s) => s.focusTaskId)
@@ -1095,6 +1108,13 @@ export function Kanban() {
           <ReleaseButton />
         </div>
       </header>
+
+      {noExec && tasks.some((t) => activeJobRefs.includes(t.id)) && (
+        <div className="mb-3 flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-[12px] text-amber-700 ring-1 ring-amber-200">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          <span>有任务已入队云端，但<b>当前没有在线执行器</b>——任务在排队、尚未开始执行。去「团队与账户 → 本地算力」绑定一台电脑，agent 上线后会自动开跑。</span>
+        </div>
+      )}
 
       <div className="grid flex-1 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {TASK_COLUMNS.map((c) => (
