@@ -150,7 +150,7 @@ interface State {
   decomposeRequirement: (requirementId: string) => number
 
   // 机器人
-  deployBot: (input: { name: string; role: BotRole; model: string; skills: string[] }) => void
+  deployBot: (input: { name: string; role: BotRole; model: string; skills: string[]; charter?: BotCharter }) => void
   setBotStatus: (botId: string, status: Bot['status']) => void
   /** 配置岗位说明书 / 提示词 */
   updateBotCharter: (botId: string, charter: BotCharter) => void
@@ -533,7 +533,7 @@ export const useStore = create<State>()(
       ),
     })),
 
-  deployBot: ({ name, role, model, skills }) =>
+  deployBot: ({ name, role, model, skills, charter }) =>
     set((s) => ({
       bots: [
         ...s.bots,
@@ -548,6 +548,7 @@ export const useStore = create<State>()(
           skills,
           completed: 0,
           avatarSeed: name.toLowerCase(),
+          ...(charter ? { charter } : {}),
         },
       ],
     })),

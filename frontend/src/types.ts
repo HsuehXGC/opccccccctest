@@ -264,6 +264,11 @@ export type BotRole =
   | '文案运营'
   | '测试'
   | '调研'
+  | '财务分析'
+  | '商业分析'
+  | '商业策划'
+  | '用户研究'
+  | 'UI测试'
 
 /** 岗位说明书 / 提示词配置 —— 组装成执行时 prepend 到任务 brief 前的 system prompt */
 export interface BotCharter {
