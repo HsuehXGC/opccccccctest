@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Send, Sparkles, FileText, CheckCircle2, ListTodo, Rocket, AlertTriangle } from 'lucide-react'
+import { Loader2, Send, Sparkles, FileText, CheckCircle2, ListTodo, Rocket, AlertTriangle, MessagesSquare } from 'lucide-react'
 import { useAuth } from '../store/useAuth'
 import { useStore } from '../store/useStore'
 import { authApi } from '../lib/authApi'
+import { convokeMeeting } from '../lib/convokeMeeting'
 import { toast } from '../lib/toast'
-import type { DocType, Priority } from '../types'
+import type { DocType, Priority, MeetingKind } from '../types'
 
 type Msg = { id: string; role: string; content: string; created_at: number }
 
@@ -13,6 +14,10 @@ type DocProposal = { title: string; type: DocType; product: string; content: str
 type Action =
   | { kind: 'backlog_add'; project: string; product: string; title: string; brief: string; priority: string }
   | { kind: 'autopilot_run'; project: string; goal: string; feedback: string }
+  | { kind: 'meeting_start'; project: string; meetingKind: string; title: string; agenda: string; participants: string }
+
+const MEETING_KINDS = ['kickoff', 'change', 'standup', 'docgen']
+const MK_LABEL: Record<string, string> = { kickoff: '立项', change: '需求变更', standup: '例会', docgen: '文档撰写' }
 
 const field = (body: string, k: string) => (body.match(new RegExp(`${k}\\s*[:：]\\s*(.+)`))?.[1] || '').trim()
 const normPrio = (s: string) => (/high|高/.test(s) ? 'high' : /low|低/.test(s) ? 'low' : 'medium')
@@ -33,6 +38,7 @@ function parseSecretary(text: string): { before: string; detail: string; doc: Do
     const kind = field(b, 'KIND').toLowerCase()
     if (kind === 'backlog_add') actions.push({ kind: 'backlog_add', project: field(b, 'PROJECT'), product: field(b, 'PRODUCT'), title: field(b, 'TITLE'), brief: field(b, 'BRIEF'), priority: normPrio(field(b, 'PRIORITY')) })
     else if (kind === 'autopilot_run') actions.push({ kind: 'autopilot_run', project: field(b, 'PROJECT'), goal: field(b, 'GOAL'), feedback: field(b, 'FEEDBACK') })
+    else if (kind === 'meeting_start') actions.push({ kind: 'meeting_start', project: field(b, 'PROJECT'), meetingKind: (field(b, 'MEETING_KIND').toLowerCase().match(/kickoff|change|standup|docgen/)?.[0] || 'standup'), title: field(b, 'TITLE'), agenda: field(b, 'AGENDA'), participants: field(b, 'PARTICIPANTS') })
   }
   const stripped = text.replace(/===DOC===[\s\S]*?===END===/g, '').replace(/===ACTION===[\s\S]*?===END_ACTION===/g, '').trim()
   // 两段式：===DETAIL=== 之前是简短口头版，之后是详细版（前端折叠）
@@ -162,6 +168,46 @@ function AutopilotRunCard({ a }: { a: Extract<Action, { kind: 'autopilot_run' }>
   )
 }
 
+// 调度动作卡 · 发起会议：按角色匹配参会虚拟员工 → 确认后建会议并云端开跑
+function MeetingStartCard({ a }: { a: Extract<Action, { kind: 'meeting_start' }> }) {
+  const project = useStore((s) => s.projects.find((p) => p.name === a.project))
+  const bots = useStore((s) => s.bots)
+  const [done, setDone] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const kind = (MEETING_KINDS.includes(a.meetingKind) ? a.meetingKind : 'standup') as MeetingKind
+  const tokens = a.participants.split(/[,，、]/).map((s) => s.trim()).filter(Boolean)
+  const partIds = Array.from(new Set(tokens.flatMap((tok) => bots.filter((b) => b.role.includes(tok) || tok.includes(b.role)).map((b) => b.id))))
+  const partBots = partIds.map((id) => bots.find((b) => b.id === id)).filter((b): b is NonNullable<typeof b> => !!b)
+  async function go() {
+    if (!project) return
+    setBusy(true)
+    const r = await convokeMeeting({ projectId: project.id, title: a.title, agenda: a.agenda, kind, participantBotIds: partIds })
+    setBusy(false)
+    if (r.ok) { setDone(true); toast('会议已发起，去「会议」看进度', 'success') } else toast('发起失败：' + r.error, 'warn')
+  }
+  return (
+    <div className="mt-1.5 max-w-[85%] rounded-2xl rounded-bl-sm border border-violet-300/60 bg-violet-50/50 p-3">
+      <div className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold text-violet-700">
+        <MessagesSquare size={13} /> 会议 · {a.title}
+        <span className="rounded bg-white/70 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">{MK_LABEL[kind]}</span>
+      </div>
+      <p className="text-[11px] text-slate-600">项目：{a.project}　议程：{a.agenda}</p>
+      <p className="mt-0.5 text-[11px] text-slate-500">参会：{partBots.length ? partBots.map((b) => `${b.name}·${b.role}`).join('、') : '（未匹配到角色）'}</p>
+      <div className="mt-2">
+        {done ? (
+          <div className="flex items-center gap-1.5 text-[12px] font-medium text-emerald-700"><CheckCircle2 size={14} /> 已发起，去「会议」看进度</div>
+        ) : !project ? (
+          <div className="flex items-center gap-1.5 text-[12px] text-rose-600"><AlertTriangle size={14} /> 找不到项目「{a.project}」</div>
+        ) : partIds.length === 0 ? (
+          <div className="flex items-center gap-1.5 text-[12px] text-amber-600"><AlertTriangle size={14} /> 没匹配到参会角色，去「会议」页手动发起</div>
+        ) : (
+          <button onClick={go} disabled={busy} className="rounded-lg bg-violet-600 px-3 py-1 text-[12px] font-medium text-white hover:bg-violet-700 disabled:opacity-50">{busy ? '发起中…' : '发起会议'}</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // 一条秘书消息：简短口头版 + 可展开的详细版 + 文档草案卡 + 调度动作卡
 function AssistantMessage({ m }: { m: Msg }) {
   const { before, detail, doc, actions } = parseSecretary(m.content)
@@ -176,7 +222,7 @@ function AssistantMessage({ m }: { m: Msg }) {
         </>
       )}
       {doc && <DocCard msgId={m.id} doc={doc} />}
-      {actions.map((a, i) => (a.kind === 'backlog_add' ? <BacklogAddCard key={i} a={a} /> : <AutopilotRunCard key={i} a={a} />))}
+      {actions.map((a, i) => (a.kind === 'backlog_add' ? <BacklogAddCard key={i} a={a} /> : a.kind === 'autopilot_run' ? <AutopilotRunCard key={i} a={a} /> : <MeetingStartCard key={i} a={a} />))}
     </div>
   )
 }

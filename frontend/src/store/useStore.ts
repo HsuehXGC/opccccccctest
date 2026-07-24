@@ -47,8 +47,11 @@ const WORK_LOG_SNIPPETS = [
   '整理交付物与说明',
 ]
 
-let uid = 1000
-const nextId = (p: string) => `${p}-${uid++}`
+// id 生成：早期用自增计数器（从 1000 起），但云端 hydrate 回来的数据 id 已在 1000+ 区间，
+// 每次加载重置的计数器会与既有数据撞 id（曾致两个 meeting-1018）。改用「时间戳(base36)+自增」，
+// 与既有 `${p}-<纯数字>` 格式不同段、且自身唯一，彻底杜绝碰撞。
+let uid = 0
+const nextId = (p: string) => `${p}-${Date.now().toString(36)}-${uid++}`
 
 interface State {
   // 账户与项目

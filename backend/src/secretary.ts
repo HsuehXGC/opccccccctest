@@ -32,8 +32,12 @@ export async function buildOrgBrief(orgId: string): Promise<string> {
   const meetings = await q<{ project_id: string | null; title: string; status: string; kind: string }>(
     `SELECT project_id, title, status, kind FROM meetings WHERE org_id=$1 ORDER BY created_at DESC LIMIT 12`, [orgId],
   ).catch(() => [] as any[])
+  const bots = await q<{ name: string; role: string }>(
+    `SELECT name, role FROM bots WHERE org_id=$1 ORDER BY name`, [orgId],
+  ).catch(() => [] as any[])
 
   const out: string[] = []
+  if (bots.length) out.push(`### 虚拟团队（发起会议时按角色选参会人）\n${bots.map((b) => `- ${b.name}（${b.role}）`).join('\n')}`)
   for (const p of projects) {
     const prods = products.filter((x) => x.project_id === p.id)
     const prodIds = new Set(prods.map((x) => x.id))
@@ -94,6 +98,15 @@ const SECRETARY_SYSTEM = [
   'PROJECT: <项目名>',
   'GOAL: <本轮一句话目标>',
   'FEEDBACK: <可选，给规划的额外提示；没有就留空>',
+  '===END_ACTION===',
+  '③ 发起一场会议（拉虚拟团队讨论）：',
+  '===ACTION===',
+  'KIND: meeting_start',
+  'PROJECT: <项目名>',
+  'MEETING_KIND: <kickoff 立项 | change 需求变更 | standup 例会 | docgen 文档撰写，选最贴切的>',
+  'TITLE: <会议标题>',
+  'AGENDA: <一句话议程：要讨论/产出什么>',
+  'PARTICIPANTS: <参会角色，逗号分隔，从上面【虚拟团队】的角色里选，如 产品经理,测试,后端>',
   '===END_ACTION===',
 ].join('\n')
 
