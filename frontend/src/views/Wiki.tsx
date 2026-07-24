@@ -173,8 +173,8 @@ function RelationsPanel({
   )
 }
 
-// ── 编辑 / 修订：保存即生成新版本 ───────────────────────
-function EditModal({ doc, bots, onClose }: { doc: WikiDoc; bots: Bot[]; onClose: () => void }) {
+// ── 编辑 / 修订：页面内大编辑器，保存即生成新版本 ───────────────────────
+function DocEditor({ doc, bots, onClose }: { doc: WikiDoc; bots: Bot[]; onClose: () => void }) {
   const saveDocVersion = useStore((s) => s.saveDocVersion)
   const cur = doc.versions[0]
   const [content, setContent] = useState(cur.content)
@@ -193,54 +193,42 @@ function EditModal({ doc, bots, onClose }: { doc: WikiDoc; bots: Bot[]; onClose:
     })
     onClose()
   }
+  const sel = 'rounded-md border border-slate-200 bg-white px-2 py-1 text-xs outline-none focus:border-brand'
 
   return (
-    <Modal open onClose={onClose} title={`修订 · ${doc.title}`}>
-      <Field label={`正文（Markdown，用 [[slug]] 关联其它文档） · 将生成 ${cur.version} → 新版本`}>
-        <textarea
-          className={cx(inputCls, 'h-64 resize-y font-mono text-xs leading-relaxed')}
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-        />
-      </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="产品版本">
-          <input className={inputCls} value={productVersion} onChange={(e) => setProductVersion(e.target.value)} />
-        </Field>
-        <Field label="状态">
-          <select className={inputCls} value={status} onChange={(e) => setStatus(e.target.value as DocStatus)}>
-            {DOC_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {DOC_STATUS[s].label}
-              </option>
-            ))}
+    <div className="flex h-full flex-col">
+      {/* 工具条 */}
+      <div className="border-b border-slate-200 bg-white/80 px-6 py-2.5 backdrop-blur">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-700"><PenLine size={14} className="text-brand" /> 修订 · {doc.title}</span>
+          <span className="text-[11px] text-slate-400">{cur.version} → 新版本</span>
+          <div className="ml-auto flex items-center gap-2">
+            <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-100">取消</button>
+            <button onClick={save} className="rounded-lg bg-brand px-3.5 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">保存 <span className="opacity-60">⌘S</span></button>
+          </div>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <select className={sel} value={status} onChange={(e) => setStatus(e.target.value as DocStatus)}>
+            {DOC_STATUSES.map((s) => <option key={s} value={s}>{DOC_STATUS[s].label}</option>)}
           </select>
-        </Field>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="负责员工">
-          <select className={inputCls} value={ownerBotId ?? ''} onChange={(e) => setOwnerBotId(e.target.value || null)}>
-            <option value="">未指派</option>
-            {bots.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name} · {b.role}
-              </option>
-            ))}
+          <input className={cx(sel, 'w-24')} value={productVersion} onChange={(e) => setProductVersion(e.target.value)} placeholder="产品版本" />
+          <select className={sel} value={ownerBotId ?? ''} onChange={(e) => setOwnerBotId(e.target.value || null)}>
+            <option value="">未指派负责人</option>
+            {bots.map((b) => <option key={b.id} value={b.id}>{b.name} · {b.role}</option>)}
           </select>
-        </Field>
-        <Field label="修改说明">
-          <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder="本次改了什么" />
-        </Field>
+          <input className={cx(sel, 'min-w-0 flex-1')} value={note} onChange={(e) => setNote(e.target.value)} placeholder="修改说明（本次改了什么，可选）" />
+        </div>
       </div>
-      <div className="mt-4 flex justify-end gap-2">
-        <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100">
-          取消
-        </button>
-        <button onClick={save} className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">
-          保存为新版本
-        </button>
-      </div>
-    </Modal>
+      {/* 大编辑区：占满剩余高度 */}
+      <textarea
+        autoFocus
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save() } }}
+        placeholder="用 Markdown 写，[[slug]] 关联其它文档…"
+        className="min-h-0 w-full flex-1 resize-none bg-transparent px-8 py-6 font-mono text-[13px] leading-relaxed text-slate-700 outline-none"
+      />
+    </div>
   )
 }
 
@@ -469,6 +457,7 @@ export function Wiki() {
     setSelected(slug)
     setPreviewVersion(null)
     setShowHistory(false)
+    setEditing(false)
   }
 
   function switchProduct(id: string) {
@@ -477,6 +466,7 @@ export function Wiki() {
     setSelected(first?.slug ?? '')
     setPreviewVersion(null)
     setShowHistory(false)
+    setEditing(false)
   }
 
   function draftMissing(type: DocType) {
@@ -555,6 +545,8 @@ export function Wiki() {
             <p>「{product?.name}」还没有文档</p>
             <p className="text-sm">从左侧「文档蓝图」起草核心文档，或点「新建」。</p>
           </div>
+        ) : editing ? (
+          <DocEditor doc={doc} bots={bots} onClose={() => setEditing(false)} />
         ) : (
           <DocDetail
             doc={doc}
@@ -641,7 +633,6 @@ export function Wiki() {
         </div>
       )}
 
-      {editing && doc && <EditModal doc={doc} bots={bots} onClose={() => setEditing(false)} />}
       {creating && product && (
         <NewDocModal
           productId={product.id}
