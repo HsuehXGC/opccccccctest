@@ -198,6 +198,8 @@ interface State {
   rollbackDoc: (slug: string, version: string) => void
   /** 删除文档（用户可删自己的笔记等）；同步会真删云端 */
   deleteDoc: (slug: string) => void
+  /** 本会话内已删文档的 slug：防止 applyDocJobs 在删除同步落地前据 done job 复活它 */
+  deletedDocSlugs: string[]
 
   // 模拟
   toggleSim: (on: boolean) => void
@@ -220,6 +222,7 @@ export const useStore = create<State>()(
   tasks: seedTasks,
   bots: seedBots,
   docs: seedDocs,
+  deletedDocSlugs: [],
   meetings: [],
   simRunning: true,
 
@@ -677,6 +680,7 @@ export const useStore = create<State>()(
   deleteDoc: (slug) =>
     set((s) => ({
       docs: s.docs.filter((d) => d.slug !== slug),
+      deletedDocSlugs: s.deletedDocSlugs.includes(slug) ? s.deletedDocSlugs : [...s.deletedDocSlugs, slug],
       focusDoc: s.focusDoc?.slug === slug ? null : s.focusDoc,
     })),
 

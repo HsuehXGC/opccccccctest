@@ -145,6 +145,10 @@ export async function applyDeletes(orgId: string, deletes: Any): Promise<number>
     const guard = spec.tbl === 'meetings' ? " AND status <> 'running'" : ''
     const r = await q(`DELETE FROM ${spec.tbl} WHERE ${spec.idCol} = ANY($1) AND org_id=$2${guard}`, [ids as string[], orgId])
     n += (r as { rowCount?: number }).rowCount ?? 0
+    // 删文档时连带清掉它的 doc_author job（slug===ref_id），否则前端 applyDocJobs 会据 done job 把文档重建（复活）
+    if (slice === 'docs') {
+      await q(`DELETE FROM jobs WHERE ref_type='doc' AND ref_id = ANY($1) AND org_id=$2`, [ids as string[], orgId]).catch(() => {})
+    }
   }
   return n
 }
