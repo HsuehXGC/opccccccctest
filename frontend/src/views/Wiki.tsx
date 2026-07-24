@@ -14,6 +14,7 @@ import {
   Check,
   CircleDashed,
   LayoutGrid,
+  Trash2,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { Avatar, DOC_STATUS, DOC_TYPE, DOC_TYPE_ORDER, REL, REL_INVERSE, cx } from '../lib/ui'
@@ -422,6 +423,7 @@ export function Wiki() {
   const bots = useStore((s) => s.bots)
   const setDocStatus = useStore((s) => s.setDocStatus)
   const rollbackDoc = useStore((s) => s.rollbackDoc)
+  const deleteDoc = useStore((s) => s.deleteDoc)
 
   const focusDoc = useStore((s) => s.focusDoc)
   const clearFocusDoc = useStore((s) => s.clearFocusDoc)
@@ -568,6 +570,12 @@ export function Wiki() {
             showHistory={showHistory}
             onSetStatus={(st) => setDocStatus(doc.slug, st)}
             onPreviewVersion={setPreviewVersion}
+            onDelete={() => {
+              if (!confirm(`删除文档「${doc.title}」？此操作不可撤销。`)) return
+              const rest = productDocs.filter((d) => d.slug !== doc.slug)
+              deleteDoc(doc.slug)
+              setSelected(rest[0]?.slug ?? '')
+            }}
           />
         )}
       </div>
@@ -663,6 +671,7 @@ function DocDetail({
   showHistory,
   onSetStatus,
   onPreviewVersion,
+  onDelete,
 }: {
   doc: WikiDoc
   productDocs: WikiDoc[]
@@ -677,6 +686,7 @@ function DocDetail({
   showHistory: boolean
   onSetStatus: (s: DocStatus) => void
   onPreviewVersion: (v: string | null) => void
+  onDelete: () => void
 }) {
   const cur = doc.versions[0]
   const shown = previewVersion ? doc.versions.find((v) => v.version === previewVersion)! : cur
@@ -744,6 +754,13 @@ function DocDetail({
             )}
           >
             <History size={14} /> 版本历史 · {doc.versions.length}
+          </button>
+          <button
+            onClick={onDelete}
+            title="删除此文档（不可撤销）"
+            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-rose-600 ring-1 ring-rose-200 transition hover:bg-rose-50"
+          >
+            <Trash2 size={14} /> 删除
           </button>
         </div>
       </div>

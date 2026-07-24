@@ -196,6 +196,8 @@ interface State {
   setDocStatus: (slug: string, status: DocStatus) => void
   /** 回滚到历史版本：以旧内容生成一个新版本 */
   rollbackDoc: (slug: string, version: string) => void
+  /** 删除文档（用户可删自己的笔记等）；同步会真删云端 */
+  deleteDoc: (slug: string) => void
 
   // 模拟
   toggleSim: (on: boolean) => void
@@ -670,6 +672,12 @@ export const useStore = create<State>()(
           ? { ...d, versions: d.versions.map((v, i) => (i === 0 ? { ...v, status } : v)) }
           : d,
       ),
+    })),
+
+  deleteDoc: (slug) =>
+    set((s) => ({
+      docs: s.docs.filter((d) => d.slug !== slug),
+      focusDoc: s.focusDoc?.slug === slug ? null : s.focusDoc,
     })),
 
   rollbackDoc: (slug, version) =>
