@@ -8,7 +8,7 @@
 // 可选：  OPC_URL=wss://navo7.com/agent  （默认即此）
 
 import os from 'node:os'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { spawn, execSync } from 'node:child_process'
 
 const URL = process.env.OPC_URL || 'wss://navo7.com/agent'
@@ -29,6 +29,13 @@ function osLabel() {
       const name = execSync('sw_vers -productName', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
       const ver = execSync('sw_vers -productVersion', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
       return `${name} ${ver}`
+    } catch {}
+  }
+  if (process.platform === 'linux') {
+    // 读发行版名（Ubuntu 22.04 等），比 "Linux 5.x" 可读
+    try {
+      const m = readFileSync('/etc/os-release', 'utf8').match(/^PRETTY_NAME="?([^"\n]+)"?/m)
+      if (m) return m[1]
     } catch {}
   }
   return `${os.type()} ${os.release()}`
@@ -53,15 +60,19 @@ function findBin(kind) {
   const candidates = [
     `${home}/.local/bin/${kind}`,
     `${home}/.claude/local/${kind}`,
-    '/opt/homebrew/bin/' + kind,
+    '/opt/homebrew/bin/' + kind, // macOS Homebrew
     '/usr/local/bin/' + kind,
+    '/usr/bin/' + kind, // Linux 系统安装
+    '/snap/bin/' + kind, // Linux snap
     `${home}/.bun/bin/${kind}`,
     `${home}/.npm-global/bin/${kind}`,
     `${home}/.deno/bin/${kind}`,
   ]
+  // 登录 shell 兜底：优先当前 SHELL，其次 bash（Linux/mac 都有），最后 zsh
+  const loginShell = process.env.SHELL || (existsSync('/bin/bash') ? '/bin/bash' : '/bin/zsh')
   return (
     tryCmd(`command -v ${kind}`) || // 当前 PATH
-    tryCmd(`${process.env.SHELL || '/bin/zsh'} -lc 'command -v ${kind}'`) || // 登录 shell 的 PATH
+    tryCmd(`${loginShell} -lc 'command -v ${kind}'`) || // 登录 shell 的 PATH
     candidates.find((c) => existsSync(c)) || // 常见位置
     null
   )

@@ -121,7 +121,7 @@ export function LocalCompute() {
 
       {machines.length === 0 ? (
         <div className="rounded-2xl border-2 border-dashed border-slate-300 py-10 text-center text-sm text-slate-400">
-          还没有电脑接入。点「绑定电脑」拿到命令，在目标 Mac 上运行即可。
+          还没有电脑接入。点「绑定电脑」拿到命令，在目标 Mac / Linux 上运行即可。
         </div>
       ) : (
         <div className="space-y-3">
@@ -220,7 +220,7 @@ export function LocalCompute() {
           <p className="mb-3 flex items-start gap-1.5 text-xs leading-relaxed text-slate-500">
             <ShieldCheck size={14} className="mt-0.5 shrink-0 text-emerald-500" />
             <span>
-              在目标 Mac 的终端里运行下面的命令（需已装 <code className="rounded bg-slate-100 px-1">node</code> 且 <code className="rounded bg-slate-100 px-1">claude</code> 已登录）。agent 会
+              在目标 Mac / Linux 的终端里运行下面的命令（需已装 <code className="rounded bg-slate-100 px-1">node</code> 20+ 与 <code className="rounded bg-slate-100 px-1">curl</code>，且 <code className="rounded bg-slate-100 px-1">claude</code> 已登录）。agent 会
               <span className="font-medium text-slate-700">出站</span>接入云端，只需 443，无需公网 IP。
             </span>
           </p>
@@ -247,11 +247,11 @@ export function LocalCompute() {
                 <code className="block whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-emerald-300">{bindCommand(enrollTok)}</code>
               </div>
               <ol className="mb-2 space-y-1.5 text-xs text-slate-500">
-                <li>1 · 在目标 Mac 终端粘贴运行，agent 出站建立连接、注册本机</li>
+                <li>1 · 在目标 Mac / Linux 终端粘贴运行，agent 出站建立连接、注册本机</li>
                 <li>2 · 自动探测 claude / codex CLI，登记为执行器</li>
                 <li>3 · 回到这里（几秒后自动刷新），机器会出现在上方，点执行器「测试」验证</li>
               </ol>
-              <p className="text-[11px] text-slate-400">保持终端里的 agent 运行；关掉即离线。断线/后端重启会自动重连，无需重新绑定。正式部署可做成常驻服务（launchd）。</p>
+              <p className="text-[11px] text-slate-400">保持终端里的 agent 运行；关掉即离线。断线/后端重启会自动重连，无需重新绑定。正式部署可做成常驻服务（macOS: launchd / Linux: systemd）。</p>
             </>
           )}
 
