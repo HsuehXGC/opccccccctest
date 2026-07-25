@@ -32,7 +32,7 @@ export function ProvisionModal({ projectId, projectName, onClose }: { projectId:
   useEffect(() => {
     if (!token) return
     authApi.machines(token).then((r) => {
-      const on = r.machines.filter((m) => m.online).map((m) => m.machine.name)
+      const on = r.machines.filter((m) => m.online && !m.internal).map((m) => m.machine.name)
       setMachines(on)
       setMachine((m) => m || on[0] || '')
     }).catch(() => {})

@@ -72,6 +72,8 @@ export const authApi = {
     req<{ ok: true; jobId: string; result: string }>('/agent/run', { method: 'POST', body, token }),
   removeMachine: (token: string, machineId: string) =>
     req<{ ok: true }>(`/machines/${machineId}`, { method: 'DELETE', token }),
+  setMachineInternal: (token: string, name: string, internal: boolean) =>
+    req<{ ok: true }>('/machines/internal', { method: 'POST', body: { name, internal }, token }),
 }
 
 type StreamEvent = { t: 'chunk'; text: string } | { t: 'done'; result: string } | { t: 'error'; error: string }
@@ -164,4 +166,6 @@ export interface LiveMachine {
   accountId: string
   executors: LiveExecutor[]
   online: boolean
+  /** 系统集成 agent（隐藏算力）：不参与普通任务，只跑 integration job */
+  internal?: boolean
 }

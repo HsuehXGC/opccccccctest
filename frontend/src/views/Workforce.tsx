@@ -162,8 +162,8 @@ export function Workforce() {
     const id = setInterval(load, 6000)
     return () => { alive = false; clearInterval(id) }
   }, [open, token])
-  const execId = machines.filter((m) => m.online).flatMap((m) => m.executors).find((e) => e.status === 'idle')?.id
-    || machines.filter((m) => m.online).flatMap((m) => m.executors)[0]?.id || ''
+  const execId = machines.filter((m) => m.online && !m.internal).flatMap((m) => m.executors).find((e) => e.status === 'idle')?.id
+    || machines.filter((m) => m.online && !m.internal).flatMap((m) => m.executors)[0]?.id || ''
 
   async function generateFromProfile() {
     if (!token || !profile.trim() || generating) return

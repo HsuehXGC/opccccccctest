@@ -3,6 +3,7 @@ import type { JobEvent } from './agentProtocol.ts'
 import { q } from './db.ts'
 import { claimable, markRunning, markDone, markError, updateProgress, recoverStuck, type Job } from './jobStore.ts'
 import { notifyOrg } from './bus.ts'
+import { isInternal } from './internalMachines.ts'
 
 // ── 云端常驻调度器 ─────────────────────────────────────────────
 // 每隔一段时间捞出 queued job，为其账户组挑一个在线执行器，派单、落库产出。
@@ -21,10 +22,13 @@ function dec(exec: string) { loadByExecutor.set(exec, Math.max(0, (loadByExecuto
 
 /** 为账户组挑一个有余量的在线执行器（负载最少优先）。
  *  targetMachine 指定时，只在该机器名上挑（repo 任务必须落到有 repo 的机器）。 */
-function pickExecutor(orgId: string, targetMachine?: string | null): string | null {
+function pickExecutor(orgId: string, targetMachine?: string | null, kind?: string): string | null {
+  // 内部/隐藏算力（系统集成 agent）：只跑 integration 类 job；普通 job 一律跳过它。
+  const wantInternal = kind === 'integration'
   const execs = gateway
     .listMachines()
     .filter((m) => m.accountId === orgId && m.online && (!targetMachine || m.machine.name === targetMachine))
+    .filter((m) => (wantInternal ? isInternal(orgId, m.machine.name) : !isInternal(orgId, m.machine.name)))
     .flatMap((m) => m.executors)
     .map((e) => ({ id: e.id, load: loadByExecutor.get(e.id) ?? 0 }))
     .filter((e) => e.load < MAX_PER_EXECUTOR)
@@ -132,7 +136,7 @@ async function tick(): Promise<void> {
   }
   for (const job of jobs) {
     if (inflight.has(job.id)) continue
-    const exec = pickExecutor(job.org_id, job.target_machine)
+    const exec = pickExecutor(job.org_id, job.target_machine, job.kind)
     if (!exec) continue // 该账户组暂无空闲执行器，下一轮再试
     await markRunning(job.id, exec)
     startJob(job, exec)

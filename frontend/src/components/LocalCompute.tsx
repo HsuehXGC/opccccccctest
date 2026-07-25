@@ -47,6 +47,16 @@ export function LocalCompute() {
     }
   }
 
+  async function toggleInternal(name: string, on: boolean) {
+    try {
+      await authApi.setMachineInternal(token, name, on)
+      setMachines((ms) => ms.map((m) => (m.machine.name === name ? { ...m, internal: on } : m)))
+      toast(on ? `「${name}」已设为系统集成 agent（不再接普通任务）` : `「${name}」已恢复为普通执行器`, 'success')
+    } catch (e) {
+      toast((e as Error).message, 'warn')
+    }
+  }
+
   async function refresh() {
     try {
       const { machines } = await authApi.machines(token)
@@ -136,9 +146,17 @@ export function LocalCompute() {
                     {m.machine.name}
                     <span className={cx('h-1.5 w-1.5 rounded-full', m.online ? 'bg-emerald-500 dot-pulse' : 'bg-slate-300')} />
                     <span className="text-[11px] font-normal text-slate-400">{m.online ? '在线' : '离线'}</span>
+                    {m.internal && <span className="rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-medium text-brand">系统集成 · 隐藏</span>}
                   </div>
                   <div className="text-[11px] text-slate-400">{m.machine.os}</div>
                 </div>
+                <button
+                  onClick={() => toggleInternal(m.machine.name, !m.internal)}
+                  title={m.internal ? '恢复为普通执行器（重新参与任务调度）' : '设为系统集成 agent：不接普通任务，只跑集成/部署 job'}
+                  className={cx('rounded-lg p-1.5', m.internal ? 'text-brand hover:bg-brand-soft' : 'text-slate-300 hover:bg-slate-100 hover:text-slate-500')}
+                >
+                  <Cpu size={15} />
+                </button>
                 {/* 删除（解绑）*/}
                 {confirming === m.machineId ? (
                   <div className="flex items-center gap-1.5 text-xs">

@@ -662,7 +662,7 @@ function AuthorDocsModal({
     const poll = async () => {
       try {
         const m = await authApi.machines(token)
-        if (alive) setNoExec(!m.machines.some((x) => x.online))
+        if (alive) setNoExec(!m.machines.some((x) => x.online && !x.internal))
         if (created.length) {
           const slugs = new Set(created.map((c) => c.slug))
           const { jobs } = await authApi.listJobs(token, { refType: 'doc' })

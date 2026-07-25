@@ -35,7 +35,7 @@ function TaskDispatch({ task }: { task: Task }) {
   }, [token])
 
   const executors = machines
-    .filter((m) => m.online)
+    .filter((m) => m.online && !m.internal)
     .flatMap((m) => m.executors.map((e) => ({ ...e, machineName: m.machine.name })))
   const effectiveExec = pickedExec || executors.find((e) => e.status === 'idle')?.id || executors[0]?.id || ''
   const fullPrompt = bot
@@ -976,7 +976,7 @@ function AiAssign({ tasks }: { tasks: Task[] }) {
     if (!token) return null
     try {
       const { machines } = await authApi.machines(token)
-      const online = machines.filter((m) => m.online).flatMap((m) => m.executors)
+      const online = machines.filter((m) => m.online && !m.internal).flatMap((m) => m.executors)
       return online.find((e) => e.status === 'idle')?.id || online[0]?.id || null
     } catch {
       return null
@@ -1051,7 +1051,7 @@ export function Kanban() {
   useEffect(() => {
     if (!token) return
     let alive = true
-    const poll = () => authApi.machines(token).then((r) => alive && setNoExec(!r.machines.some((m) => m.online))).catch(() => {})
+    const poll = () => authApi.machines(token).then((r) => alive && setNoExec(!r.machines.some((m) => m.online && !m.internal))).catch(() => {})
     poll()
     const id = setInterval(poll, 6000)
     return () => { alive = false; clearInterval(id) }

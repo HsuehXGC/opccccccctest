@@ -11,6 +11,7 @@ import { createJob, listJobs, getJob, activeRefIds } from './jobStore.ts'
 import { importSnapshot, applyDeletes, getOrgState, orgHasData } from './stateStore.ts'
 import { orchestrateMeeting, getMeeting, isMeetingRunning, orgHasExecutor, recoverMeetings, type MeetingRunPayload } from './meetingRunner.ts'
 import { addBusConn, notifyOrg } from './bus.ts'
+import { isInternal, setInternal } from './internalMachines.ts'
 import { runIteration, getIteration, isProjectRunning, reviewIteration } from './autopilot.ts'
 import { secretaryChat, getSecretaryTranscript } from './secretary.ts'
 import {
@@ -146,7 +147,19 @@ app.post('/api/machines/enroll-token', requireAuth, (req: AuthedRequest, res) =>
 // 本账户组在线机器与执行器
 app.get('/api/machines', requireAuth, (req: AuthedRequest, res) => {
   const orgId = req.auth!.user.orgId
-  res.json({ machines: gateway.listMachines().filter((m) => m.accountId === orgId) })
+  const machines = gateway
+    .listMachines()
+    .filter((m) => m.accountId === orgId)
+    .map((m) => ({ ...m, internal: isInternal(orgId, m.machine.name) }))
+  res.json({ machines })
+})
+
+// 标记/取消一台机器为「系统集成 agent」(隐藏算力)：不参与普通任务，只跑 integration job
+app.post('/api/machines/internal', requireAuth, (req: AuthedRequest, res) => {
+  const { name, internal } = req.body ?? {}
+  if (!name) return res.status(400).json({ error: 'name 必填' })
+  setInternal(req.auth!.user.orgId, String(name), !!internal)
+  res.json({ ok: true })
 })
 
 // 删除（解绑）一台机器：关闭其 agent 连接并移除。仅限本账户组。
