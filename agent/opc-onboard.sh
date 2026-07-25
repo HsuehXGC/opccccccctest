@@ -114,7 +114,7 @@ cat > "$RUN_SH" <<EOF
 export PATH="$OPC_HOME/node/bin:$NPM_CONFIG_PREFIX/bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 export OPC_TOKEN="$OPC_TOKEN"
 export OPC_URL="$WSS_URL"
-${OPC_NAME:+export OPC_NAME=\"$OPC_NAME\"}
+${OPC_NAME:+export OPC_NAME="$OPC_NAME"}
 exec "$NODE_BIN" "$OPC_HOME/opc-agent.mjs"
 EOF
 chmod +x "$RUN_SH"
