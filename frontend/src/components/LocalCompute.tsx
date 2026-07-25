@@ -16,6 +16,12 @@ function onboardCommand(token: string) {
   return `curl -fsSL ${origin}/opc-onboard.sh -o /tmp/opc-onboard.sh && \\\n  OPC_TOKEN=${token} bash /tmp/opc-onboard.sh`
 }
 
+// Windows 一键接入（PowerShell）：装依赖 + claude 登录 + 计划任务自启
+function winCommand(token: string) {
+  const origin = window.location.origin
+  return `$env:OPC_TOKEN="${token}"; irm ${origin}/opc-onboard.ps1 | iex`
+}
+
 // 手动命令（同源，自动用当前域名）：前台运行，需已装好 node 20+ 与 claude
 function bindCommand(token: string) {
   const origin = window.location.origin
@@ -32,7 +38,7 @@ export function LocalCompute() {
   const [enrollTok, setEnrollTok] = useState<string | null>(null)
   const [enrolling, setEnrolling] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [bindMode, setBindMode] = useState<'onboard' | 'bare'>('onboard')
+  const [bindMode, setBindMode] = useState<'onboard' | 'win' | 'bare'>('onboard')
 
   // 每个执行器的测试状态
   const [tests, setTests] = useState<Record<string, { running: boolean; output?: string; ok?: boolean }>>({})
@@ -246,9 +252,9 @@ export function LocalCompute() {
       {/* 绑定电脑 */}
       {binding && (
         <Modal open onClose={() => setBinding(false)} title="绑定本地电脑">
-          {/* 两种方式切换 */}
+          {/* 接入方式切换 */}
           <div className="mb-3 flex gap-1 rounded-lg bg-slate-100 p-1">
-            {([['onboard', '一键接入 · 推荐'], ['bare', '手动 · 前台']] as const).map(([k, label]) => (
+            {([['onboard', 'Mac / Linux'], ['win', 'Windows'], ['bare', '手动']] as const).map(([k, label]) => (
               <button
                 key={k}
                 onClick={() => { setBindMode(k); setCopied(false) }}
@@ -264,6 +270,10 @@ export function LocalCompute() {
             {bindMode === 'onboard' ? (
               <span>
                 在目标 Mac / Linux 终端跑这一条即可：自动<span className="font-medium text-slate-700">勘察系统、缺 node/claude 就装、拉起 claude 登录（你点一下授权）、装成常驻服务</span>并接入云端。只需 <code className="rounded bg-slate-100 px-1">curl</code>，出站 443、无需公网 IP。
+              </span>
+            ) : bindMode === 'win' ? (
+              <span>
+                在目标 Windows 的 <span className="font-medium text-slate-700">PowerShell</span> 里跑这一条：自动<span className="font-medium text-slate-700">装 Node/claude、拉起 claude 登录（你点一下）、注册登录自启的计划任务</span>并接入云端。免管理员、出站 443、无需公网 IP。
               </span>
             ) : (
               <span>
@@ -283,7 +293,7 @@ export function LocalCompute() {
                   <span className="text-[11px] font-medium text-slate-400">一行命令 · 含绑定 token（永久有效）</span>
                   <button
                     onClick={() => {
-                      navigator.clipboard?.writeText((bindMode === 'onboard' ? onboardCommand : bindCommand)(enrollTok))
+                      navigator.clipboard?.writeText((bindMode === 'onboard' ? onboardCommand : bindMode === 'win' ? winCommand : bindCommand)(enrollTok))
                       setCopied(true)
                     }}
                     className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-slate-300 hover:bg-slate-700"
@@ -291,13 +301,19 @@ export function LocalCompute() {
                     <Copy size={11} /> {copied ? '已复制' : '复制'}
                   </button>
                 </div>
-                <code className="block whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-emerald-300">{(bindMode === 'onboard' ? onboardCommand : bindCommand)(enrollTok)}</code>
+                <code className="block whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-emerald-300">{(bindMode === 'onboard' ? onboardCommand : bindMode === 'win' ? winCommand : bindCommand)(enrollTok)}</code>
               </div>
               {bindMode === 'onboard' ? (
                 <ol className="mb-2 space-y-1.5 text-xs text-slate-500">
                   <li>1 · 目标 Mac / Linux 终端粘贴运行；缺依赖自动装到 <code className="rounded bg-slate-100 px-1">~/.opc</code>（免 sudo）</li>
                   <li>2 · 若 claude 未登录，会弹浏览器授权页——<span className="font-medium text-slate-600">点一下同意</span>即可</li>
                   <li>3 · 装成常驻服务（macOS launchd / Linux systemd）、开机自启，几秒后本机出现在上方</li>
+                </ol>
+              ) : bindMode === 'win' ? (
+                <ol className="mb-2 space-y-1.5 text-xs text-slate-500">
+                  <li>1 · 在目标 Windows 打开 <span className="font-medium text-slate-600">PowerShell</span>，粘贴运行；缺依赖自动装到 <code className="rounded bg-slate-100 px-1">%LOCALAPPDATA%\opc</code>（免管理员）</li>
+                  <li>2 · 若 claude 未登录，会弹浏览器授权页——<span className="font-medium text-slate-600">点一下同意</span>即可</li>
+                  <li>3 · 注册为登录自启的计划任务，几秒后本机出现在上方，点执行器「测试」验证</li>
                 </ol>
               ) : (
                 <ol className="mb-2 space-y-1.5 text-xs text-slate-500">
@@ -309,7 +325,9 @@ export function LocalCompute() {
               <p className="text-[11px] text-slate-400">
                 {bindMode === 'onboard'
                   ? '同一台机器想跑多个 agent（如一个「集成」+ 一个「测试」），在命令前加 OPC_NAME=名字 各装一份即可。'
-                  : '保持终端里的 agent 运行；关掉即离线。断线/后端重启会自动重连，无需重新绑定。'}
+                  : bindMode === 'win'
+                    ? '同机多角色：先 $env:OPC_NAME="名字" 再重跑。需 SSH 兜底：设 $env:OPC_WITH_SSH="1"（该步需管理员）。'
+                    : '保持终端里的 agent 运行；关掉即离线。断线/后端重启会自动重连，无需重新绑定。'}
               </p>
             </>
           )}

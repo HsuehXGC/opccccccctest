@@ -22,6 +22,8 @@ if (typeof WebSocket === 'undefined') {
   process.exit(1)
 }
 
+const isWin = process.platform === 'win32'
+
 // 机器信息
 function osLabel() {
   if (process.platform === 'darwin') {
@@ -38,6 +40,7 @@ function osLabel() {
       if (m) return m[1]
     } catch {}
   }
+  if (isWin) return `Windows ${os.release()}`
   return `${os.type()} ${os.release()}`
 }
 // 机器名默认取主机名；可用 OPC_NAME 覆盖，从而在同一台物理机上跑多个具名 agent
@@ -52,13 +55,25 @@ const binOf = {} // kind -> 可执行文件绝对路径（供 spawn 用）
 function findBin(kind) {
   const tryCmd = (cmd) => {
     try {
-      const p = execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000 }).toString().trim().split('\n')[0]
+      // split 兼容 Windows 的 \r\n（where 会多行输出）
+      const p = execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000 }).toString().trim().split(/\r?\n/)[0].trim()
       return p && existsSync(p) ? p : null
     } catch {
       return null
     }
   }
   const home = os.homedir()
+  // Windows：claude 由 npm 全局装成 .cmd 垫片；用 where 定位，兜底常见位置
+  if (isWin) {
+    const appdata = process.env.APPDATA || `${home}\\AppData\\Roaming`
+    const localapp = process.env.LOCALAPPDATA || `${home}\\AppData\\Local`
+    const winCandidates = [
+      `${appdata}\\npm\\${kind}.cmd`,
+      `${localapp}\\opc\\npm-global\\${kind}.cmd`, // opc-onboard.ps1 的安装位置
+      `${appdata}\\npm\\${kind}.exe`,
+    ]
+    return tryCmd(`where ${kind}`) || winCandidates.find((c) => existsSync(c)) || null
+  }
   const candidates = [
     `${home}/.local/bin/${kind}`,
     `${home}/.claude/local/${kind}`,
@@ -224,22 +239,33 @@ function runJob({ jobId, kind, prompt, cwd, mode, cmd }) {
   const gitBefore = cwd ? git(cwd, 'rev-parse HEAD') : ''
   // shell 任务（构建/测试）：cmd 存在时用 bash -lc 跑命令，不跑 claude
   const isShell = !!cmd
-  const bin = isShell ? 'bash' : binOf[kind] || findBin(kind) || kind
   const isClaude = !isShell && kind !== 'codex'
+  const bin = isShell ? (isWin ? 'powershell' : 'bash') : binOf[kind] || findBin(kind) || kind
   // claude 用 stream-json + 部分消息拿逐 token 会话内容；
   // --dangerously-skip-permissions 绕过 headless 下的首次信任/权限提示（否则无人应答会挂起）。
   // 注：--permission-mode plan 在 headless 无人审批会挂起，故不使用；「只讨论不执行」由提示词约束。
-  const args = isShell
-    ? ['-lc', cmd]
-    : isClaude
-      ? ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--dangerously-skip-permissions']
-      : ['exec', prompt]
+  const CLAUDE_FLAGS = ['--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--dangerously-skip-permissions']
+  // Windows：shell 命令 → powershell 从 stdin 读；claude prompt → 也从 stdin 灌，
+  // 全部避开 cmd/powershell 的引号与多行地狱（Unix 维持原样：直接走命令行参数）。
+  let args, stdinData = null
+  if (isShell) {
+    if (isWin) { args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', '-']; stdinData = cmd }
+    else args = ['-lc', cmd]
+  } else if (isClaude) {
+    if (isWin) { args = ['-p', ...CLAUDE_FLAGS]; stdinData = prompt }
+    else args = ['-p', prompt, ...CLAUDE_FLAGS]
+  } else {
+    args = ['exec', prompt]
+  }
+  // Windows 下 claude/codex 是 .cmd 垫片，spawn 必须 shell:true（Node 20.12+ 安全限制）；powershell.exe 不用
+  const useShell = isWin && !isShell
   console.log(`▶ job ${jobId}: ${isShell ? `shell「${String(cmd).slice(0, 60)}」` : bin + (isClaude ? ` -p "${String(prompt).slice(0, 40)}…"` : ' exec')}`)
 
   let child
   try {
-    // stdin 设为 ignore（立即 EOF），否则 claude -p 会挂起等待 stdin
-    child = spawn(bin, args, { cwd: cwd || os.homedir(), env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
+    // stdin：Unix 下 ignore（立即 EOF，否则 claude -p 挂起等 stdin）；Windows 下 pipe 灌入 prompt/命令
+    child = spawn(bin, args, { cwd: cwd || os.homedir(), env: process.env, stdio: [stdinData != null ? 'pipe' : 'ignore', 'pipe', 'pipe'], shell: useShell })
+    if (stdinData != null && child.stdin) { child.stdin.write(stdinData); child.stdin.end() }
   } catch (err) {
     busy.delete(execId)
     send({ t: 'job:error', jobId, error: `无法启动 ${bin}: ${err.message}` })
