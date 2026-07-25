@@ -40,7 +40,9 @@ function osLabel() {
   }
   return `${os.type()} ${os.release()}`
 }
-const MACHINE = { name: os.hostname(), os: osLabel(), hostname: os.hostname() }
+// 机器名默认取主机名；可用 OPC_NAME 覆盖，从而在同一台物理机上跑多个具名 agent
+// （如 mini 上一个「集成 agent」+ 一个「测试执行器」，各自独立标记/调度）。
+const MACHINE = { name: process.env.OPC_NAME || os.hostname(), os: osLabel(), hostname: os.hostname() }
 
 // 探测本机可用的 CLI 执行器
 const busy = new Set() // 正在跑任务的 executorId

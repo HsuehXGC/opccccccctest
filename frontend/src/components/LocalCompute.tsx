@@ -9,7 +9,13 @@ import { toast } from '../lib/toast'
 const EXEC_DOT: Record<string, string> = { idle: 'bg-emerald-500', busy: 'bg-indigo-500 dot-pulse', offline: 'bg-slate-300' }
 const EXEC_LABEL: Record<string, string> = { idle: '空闲', busy: '忙碌', offline: '离线' }
 
-// 绑定命令（同源，自动用当前域名）
+// 一键接入命令：下载后再跑（保留终端 TTY 给 claude login 用），自动装依赖 + 常驻服务
+function onboardCommand(token: string) {
+  const origin = window.location.origin
+  return `curl -fsSL ${origin}/opc-onboard.sh -o /tmp/opc-onboard.sh && \\\n  OPC_TOKEN=${token} bash /tmp/opc-onboard.sh`
+}
+
+// 手动命令（同源，自动用当前域名）：前台运行，需已装好 node 20+ 与 claude
 function bindCommand(token: string) {
   const origin = window.location.origin
   const wss = `${origin.replace(/^http/, 'ws')}/agent`
@@ -25,6 +31,7 @@ export function LocalCompute() {
   const [enrollTok, setEnrollTok] = useState<string | null>(null)
   const [enrolling, setEnrolling] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [bindMode, setBindMode] = useState<'onboard' | 'bare'>('onboard')
 
   // 每个执行器的测试状态
   const [tests, setTests] = useState<Record<string, { running: boolean; output?: string; ok?: boolean }>>({})
@@ -235,12 +242,30 @@ export function LocalCompute() {
       {/* 绑定电脑 */}
       {binding && (
         <Modal open onClose={() => setBinding(false)} title="绑定本地电脑">
+          {/* 两种方式切换 */}
+          <div className="mb-3 flex gap-1 rounded-lg bg-slate-100 p-1">
+            {([['onboard', '一键接入 · 推荐'], ['bare', '手动 · 前台']] as const).map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => { setBindMode(k); setCopied(false) }}
+                className={cx('flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition', bindMode === k ? 'bg-white text-brand shadow-sm' : 'text-slate-500 hover:text-slate-700')}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           <p className="mb-3 flex items-start gap-1.5 text-xs leading-relaxed text-slate-500">
             <ShieldCheck size={14} className="mt-0.5 shrink-0 text-emerald-500" />
-            <span>
-              在目标 Mac / Linux 的终端里运行下面的命令（需已装 <code className="rounded bg-slate-100 px-1">node</code> 20+ 与 <code className="rounded bg-slate-100 px-1">curl</code>，且 <code className="rounded bg-slate-100 px-1">claude</code> 已登录）。agent 会
-              <span className="font-medium text-slate-700">出站</span>接入云端，只需 443，无需公网 IP。
-            </span>
+            {bindMode === 'onboard' ? (
+              <span>
+                在目标 Mac / Linux 终端跑这一条即可：自动<span className="font-medium text-slate-700">勘察系统、缺 node/claude 就装、拉起 claude 登录（你点一下授权）、装成常驻服务</span>并接入云端。只需 <code className="rounded bg-slate-100 px-1">curl</code>，出站 443、无需公网 IP。
+              </span>
+            ) : (
+              <span>
+                适合已装好 <code className="rounded bg-slate-100 px-1">node</code> 20+ 与 <code className="rounded bg-slate-100 px-1">claude</code>（已登录）的机器。<span className="font-medium text-slate-700">前台运行</span>、关掉即离线；出站 443、无需公网 IP。
+              </span>
+            )}
           </p>
 
           {enrolling || !enrollTok ? (
@@ -254,7 +279,7 @@ export function LocalCompute() {
                   <span className="text-[11px] font-medium text-slate-400">一行命令 · 含绑定 token（永久有效）</span>
                   <button
                     onClick={() => {
-                      navigator.clipboard?.writeText(bindCommand(enrollTok))
+                      navigator.clipboard?.writeText((bindMode === 'onboard' ? onboardCommand : bindCommand)(enrollTok))
                       setCopied(true)
                     }}
                     className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-slate-300 hover:bg-slate-700"
@@ -262,14 +287,26 @@ export function LocalCompute() {
                     <Copy size={11} /> {copied ? '已复制' : '复制'}
                   </button>
                 </div>
-                <code className="block whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-emerald-300">{bindCommand(enrollTok)}</code>
+                <code className="block whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-emerald-300">{(bindMode === 'onboard' ? onboardCommand : bindCommand)(enrollTok)}</code>
               </div>
-              <ol className="mb-2 space-y-1.5 text-xs text-slate-500">
-                <li>1 · 在目标 Mac / Linux 终端粘贴运行，agent 出站建立连接、注册本机</li>
-                <li>2 · 自动探测 claude / codex CLI，登记为执行器</li>
-                <li>3 · 回到这里（几秒后自动刷新），机器会出现在上方，点执行器「测试」验证</li>
-              </ol>
-              <p className="text-[11px] text-slate-400">保持终端里的 agent 运行；关掉即离线。断线/后端重启会自动重连，无需重新绑定。正式部署可做成常驻服务（macOS: launchd / Linux: systemd）。</p>
+              {bindMode === 'onboard' ? (
+                <ol className="mb-2 space-y-1.5 text-xs text-slate-500">
+                  <li>1 · 目标 Mac / Linux 终端粘贴运行；缺依赖自动装到 <code className="rounded bg-slate-100 px-1">~/.opc</code>（免 sudo）</li>
+                  <li>2 · 若 claude 未登录，会弹浏览器授权页——<span className="font-medium text-slate-600">点一下同意</span>即可</li>
+                  <li>3 · 装成常驻服务（macOS launchd / Linux systemd）、开机自启，几秒后本机出现在上方</li>
+                </ol>
+              ) : (
+                <ol className="mb-2 space-y-1.5 text-xs text-slate-500">
+                  <li>1 · 在目标终端粘贴运行，agent 出站建立连接、注册本机</li>
+                  <li>2 · 自动探测 claude / codex CLI，登记为执行器</li>
+                  <li>3 · 回到这里（几秒后自动刷新），机器会出现在上方，点执行器「测试」验证</li>
+                </ol>
+              )}
+              <p className="text-[11px] text-slate-400">
+                {bindMode === 'onboard'
+                  ? '同一台机器想跑多个 agent（如一个「集成」+ 一个「测试」），在命令前加 OPC_NAME=名字 各装一份即可。'
+                  : '保持终端里的 agent 运行；关掉即离线。断线/后端重启会自动重连，无需重新绑定。'}
+              </p>
             </>
           )}
 
