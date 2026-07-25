@@ -4,6 +4,7 @@ import { useAuth } from '../store/useAuth'
 import { authApi, type LiveMachine } from '../lib/authApi'
 import { cx } from '../lib/ui'
 import { Modal } from './Modal'
+import { IntegrationConsole } from './IntegrationConsole'
 import { toast } from '../lib/toast'
 
 const EXEC_DOT: Record<string, string> = { idle: 'bg-emerald-500', busy: 'bg-indigo-500 dot-pulse', offline: 'bg-slate-300' }
@@ -234,6 +235,9 @@ export function LocalCompute() {
                   })}
                 </div>
               )}
+
+              {/* 隐藏算力才显示：系统集成台 */}
+              {m.internal && m.online && <IntegrationConsole token={token} machine={m} />}
             </div>
           ))}
         </div>
