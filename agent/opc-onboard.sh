@@ -10,12 +10,12 @@
 #
 # 可选环境变量：
 #   OPC_ORIGIN   云端根地址，默认 https://navo7.com
-#   OPC_NODE_VER 需要自装 node 时的版本，默认 v20.18.1
+#   OPC_NODE_VER 需要自装 node 时的版本，默认 v22.11.0（agent 需 Node 22+ 的全局 WebSocket）
 set -euo pipefail
 
 OPC_ORIGIN="${OPC_ORIGIN:-https://navo7.com}"
 OPC_HOME="${OPC_HOME:-$HOME/.opc}"
-NODE_VER="${OPC_NODE_VER:-v20.18.1}"
+NODE_VER="${OPC_NODE_VER:-v22.11.0}"
 WSS_URL="$(printf '%s' "$OPC_ORIGIN" | sed 's#^http#ws#')/agent"
 # OPC_NAME：给这个 agent 起个名（默认用主机名）。同一台机器想跑多个 agent
 # （如 mini 上「集成」+「测试」两个角色）时，用不同 OPC_NAME 各装一份即可。
@@ -57,12 +57,12 @@ export NPM_CONFIG_PREFIX="$OPC_HOME/npm-global"
 export PATH="$OPC_HOME/node/bin:$NPM_CONFIG_PREFIX/bin:$HOME/.local/bin:$PATH"
 mkdir -p "$NPM_CONFIG_PREFIX/bin"
 
-# ── 1. Node ≥ 20 ────────────────────────────────────────────
+# ── 1. Node ≥ 22（agent 依赖 Node 22+ 内置的全局 WebSocket）─────
 node_major() { node -v 2>/dev/null | sed 's/^v//;s/\..*//'; }
-if command -v node >/dev/null 2>&1 && [ "$(node_major)" -ge 20 ] 2>/dev/null; then
+if command -v node >/dev/null 2>&1 && [ "$(node_major)" -ge 22 ] 2>/dev/null; then
   ok "已有 Node $(node -v)"
 else
-  say "未检测到 Node 20+，装一个本地版到 $OPC_HOME/node（免 sudo）…"
+  say "未检测到 Node 22+，装一个本地版到 $OPC_HOME/node（免 sudo）…"
   TARBALL="node-${NODE_VER}-${OS}-${ARCH}.tar.gz"
   URL="https://nodejs.org/dist/${NODE_VER}/${TARBALL}"
   TMP="$(mktemp -d)"
@@ -70,8 +70,8 @@ else
   rm -rf "$OPC_HOME/node"; mkdir -p "$OPC_HOME/node"
   tar -xzf "$TMP/$TARBALL" -C "$OPC_HOME/node" --strip-components=1
   rm -rf "$TMP"
-  command -v node >/dev/null 2>&1 && [ "$(node_major)" -ge 20 ] 2>/dev/null \
-    || die "Node 安装后仍不可用，请手动安装 Node 20+ 后重试。"
+  command -v node >/dev/null 2>&1 && [ "$(node_major)" -ge 22 ] 2>/dev/null \
+    || die "Node 安装后仍不可用，请手动安装 Node 22+ 后重试。"
   ok "已装 Node $(node -v)"
 fi
 
@@ -183,7 +183,22 @@ done
 printf '\n'
 if [ -n "$CONNECTED" ]; then
   ok "$(c '32;1' '接入成功！') 这台机器已作为本地算力上线。回到网页「本地算力」即可看到它。"
+  printf '   %s\n\n' "$(c '90' "$SVC_TIP")"
 else
-  warn "还没看到接入确认。服务已装好，通常几秒内会自动连上；若一直没有，看日志排查。"
+  warn "还没连上，自动排查中——下面这段整段贴回即可定位："
+  # 子 shell 里关掉 -eu，诊断本身别因某个变量/退出码中断
+  ( set +eu
+    printf '%s\n' "$(c '90' '──── 自动排查 ────────────────────────────')"
+    printf '%s\n' "$(c '90' '[launchd 状态 | 中间那列非 0 = 在崩溃重启]')"
+    launchctl list 2>/dev/null | grep -i 'opc' || echo '  (launchd 未列出 com.opc.agent——服务没被加载)'
+    printf '%s\n' "$(c '90' "[日志尾部 ${LOG:-?}]")"
+    tail -n 15 "${LOG:-/dev/null}" 2>/dev/null || echo '  (无日志文件——launchd 根本没把它启动起来)'
+    printf '%s\n' "$(c '90' '[node 路径检查]')"
+    echo "  NODE_BIN=${NODE_BIN:-?}"
+    if [ -x "${NODE_BIN:-}" ]; then echo "  ✓ 可执行（$("$NODE_BIN" -v 2>&1)）"; else echo "  ✗ NODE_BIN 不可执行——launchd 下必然起不来"; fi
+    printf '%s\n' "$(c '90' '[前台直跑 6 秒·看真实报错]')"
+    ( "$RUN_SH" 2>&1 & _tp=$!; sleep 6; kill "$_tp" 2>/dev/null ) | grep -vE '^[[:space:]]*$' | head -n 15
+    printf '%s\n' "$(c '90' '──────────────────────────────────────────')"
+  )
+  printf '   %s\n\n' "$(c '90' "${SVC_TIP:-}")"
 fi
-printf '   %s\n\n' "$(c '90' "$SVC_TIP")"

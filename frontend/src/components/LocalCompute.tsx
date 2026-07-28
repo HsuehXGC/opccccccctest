@@ -22,7 +22,7 @@ function winCommand(token: string) {
   return `$env:OPC_TOKEN="${token}"; irm ${origin}/opc-onboard.ps1 | iex`
 }
 
-// 手动命令（同源，自动用当前域名）：前台运行，需已装好 node 20+ 与 claude
+// 手动命令（同源，自动用当前域名）：前台运行，需已装好 node 22+ 与 claude
 function bindCommand(token: string) {
   const origin = window.location.origin
   const wss = `${origin.replace(/^http/, 'ws')}/agent`
@@ -277,7 +277,7 @@ export function LocalCompute() {
               </span>
             ) : (
               <span>
-                适合已装好 <code className="rounded bg-slate-100 px-1">node</code> 20+ 与 <code className="rounded bg-slate-100 px-1">claude</code>（已登录）的机器。<span className="font-medium text-slate-700">前台运行</span>、关掉即离线；出站 443、无需公网 IP。
+                适合已装好 <code className="rounded bg-slate-100 px-1">node</code> 22+ 与 <code className="rounded bg-slate-100 px-1">claude</code>（已登录）的机器。<span className="font-medium text-slate-700">前台运行</span>、关掉即离线；出站 443、无需公网 IP。
               </span>
             )}
           </p>

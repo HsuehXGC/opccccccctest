@@ -18,7 +18,7 @@ if (!TOKEN) {
   process.exit(1)
 }
 if (typeof WebSocket === 'undefined') {
-  console.error('✗ 需要 Node 20+（内置 WebSocket）。当前:', process.version)
+  console.error('✗ 需要 Node 22+（内置全局 WebSocket）。当前:', process.version, '——请升级到 Node 22 LTS 后重试。')
   process.exit(1)
 }
 

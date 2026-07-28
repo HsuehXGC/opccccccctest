@@ -16,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 $Origin  = if ($env:OPC_ORIGIN) { $env:OPC_ORIGIN } else { 'https://navo7.com' }
 $Token   = $env:OPC_TOKEN
 $Name    = $env:OPC_NAME
-$NodeVer = if ($env:OPC_NODE_VER) { $env:OPC_NODE_VER } else { 'v20.18.1' }
+$NodeVer = if ($env:OPC_NODE_VER) { $env:OPC_NODE_VER } else { 'v22.11.0' }
 $Wss     = ($Origin -replace '^http', 'ws') + '/agent'
 $OpcHome = Join-Path $env:LOCALAPPDATA 'opc'
 $Suffix  = if ($Name) { '-' + ($Name -replace '[^A-Za-z0-9]+','-').Trim('-') } else { '' }
@@ -46,10 +46,10 @@ New-Item -ItemType Directory -Force -Path $NpmPrefix | Out-Null
 function NodeMajor {
   try { (& node -v) -replace '^v','' -replace '\..*','' } catch { '0' }
 }
-if ((Get-Command node -ErrorAction SilentlyContinue) -and ([int](NodeMajor) -ge 20)) {
+if ((Get-Command node -ErrorAction SilentlyContinue) -and ([int](NodeMajor) -ge 22)) {
   OK "已有 Node $(& node -v)"
 } else {
-  Say "未检测到 Node 20+，装一个本地版到 $NodeDir（免管理员）…"
+  Say "未检测到 Node 22+，装一个本地版到 $NodeDir（免管理员）…"
   $zip = "node-$NodeVer-win-$arch.zip"
   $url = "https://nodejs.org/dist/$NodeVer/$zip"
   $tmp = Join-Path $env:TEMP $zip
@@ -60,8 +60,8 @@ if ((Get-Command node -ErrorAction SilentlyContinue) -and ([int](NodeMajor) -ge 
   Expand-Archive -Path $tmp -DestinationPath $env:TEMP -Force
   Move-Item $ext $NodeDir
   Remove-Item $tmp -Force
-  if (-not ((Get-Command node -ErrorAction SilentlyContinue) -and ([int](NodeMajor) -ge 20))) {
-    Die "Node 安装后仍不可用，请手动装 Node 20+ 后重试。"
+  if (-not ((Get-Command node -ErrorAction SilentlyContinue) -and ([int](NodeMajor) -ge 22))) {
+    Die "Node 安装后仍不可用，请手动装 Node 22+ 后重试。"
   }
   OK "已装 Node $(& node -v)"
 }
