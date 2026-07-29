@@ -13,6 +13,10 @@
 #   OPC_WITH_SSH  设为 1 则额外配 OpenSSH 兜底（需管理员，见末尾）
 
 $ErrorActionPreference = 'Stop'
+# 默认执行策略（Restricted/AllSigned）会拦 npm.ps1 / claude.ps1 等 .ps1 垫片。
+# 进程级 Bypass：只影响本次会话、免管理员，装完即失效。
+try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue } catch {}
+
 $Origin  = if ($env:OPC_ORIGIN) { $env:OPC_ORIGIN } else { 'https://navo7.com' }
 $Token   = $env:OPC_TOKEN
 $Name    = $env:OPC_NAME
@@ -68,10 +72,11 @@ if ((Get-Command node -ErrorAction SilentlyContinue) -and ([int](NodeMajor) -ge 
 
 # ── 2. claude CLI ──────────────────────────────────────────
 if (Get-Command claude -ErrorAction SilentlyContinue) {
-  OK "已有 claude（$((& claude --version) 2>$null | Select-Object -First 1)）"
+  OK "已有 claude（$((& claude.cmd --version) 2>$null | Select-Object -First 1)）"
 } else {
   Say "安装 claude CLI（@anthropic-ai/claude-code）…"
-  & npm install -g '@anthropic-ai/claude-code' 2>&1 | Out-Null
+  # 走 npm.cmd（不受执行策略约束，规避 npm.ps1 被 GPO 拦）
+  & npm.cmd install -g '@anthropic-ai/claude-code' 2>&1 | Out-Null
   if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { Die "npm 安装 claude 失败，请检查网络后重试。" }
   OK "已装 claude"
 }
@@ -79,12 +84,12 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
 # ── 3. claude 登录（你点一下）──────────────────────────────
 Say "检查 claude 登录状态…"
 $loggedIn = $false
-try { & claude -p "reply with the single word OK" *>$null; if ($LASTEXITCODE -eq 0) { $loggedIn = $true } } catch {}
+try { & claude.cmd -p "reply with the single word OK" *>$null; if ($LASTEXITCODE -eq 0) { $loggedIn = $true } } catch {}
 if ($loggedIn) {
   OK "claude 已登录，可直接干活"
 } else {
   Warn "claude 尚未登录。浏览器会弹出授权页，同意即可（完成后回到这个窗口）。"
-  try { & claude login } catch { Warn "claude login 未完成——先继续装服务，稍后可再跑 'claude login' 补登录。" }
+  try { & claude.cmd login } catch { Warn "claude login 未完成——先继续装服务，稍后可再跑 'claude login' 补登录。" }
 }
 
 # ── 4. 下载 opc-agent ──────────────────────────────────────

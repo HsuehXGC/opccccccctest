@@ -100,6 +100,20 @@ else
   fi
 fi
 
+# ── 3.5 git 预检（macOS 的 git 依赖 Xcode 命令行工具）──────────
+# provision / 建仓库 / 自驾都要 git。缺了会在后面报 xcode-select 的坑，这里提前拦。
+if ! git --version >/dev/null 2>&1; then
+  if [ "$OS" = darwin ]; then
+    warn "缺 Xcode 命令行工具（git 依赖它，否则「AI 新建代码」建仓库会失败）。"
+    printf '   %s\n' "$(c '90' '正在弹出安装框——点「安装」，装完（约几分钟）后此机即可建仓库/自驾。')"
+    xcode-select --install >/dev/null 2>&1 || true
+  else
+    warn "未检测到 git（provision/自驾需要）。请装 git 后重试：Debian/Ubuntu 用 sudo apt install -y git。"
+  fi
+else
+  ok "已有 git（$(git --version 2>/dev/null)）"
+fi
+
 # ── 4. 下载 opc-agent ───────────────────────────────────────
 say "下载 opc-agent…"
 curl -fsSL "$OPC_ORIGIN/opc-agent.mjs" -o "$OPC_HOME/opc-agent.mjs" || die "下载 opc-agent.mjs 失败"
