@@ -20,11 +20,13 @@ import {
   MessagesSquare,
   Target,
   KanbanSquare,
+  FileDown,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { Avatar, DOC_STATUS, DOC_TYPE, DOC_TYPE_ORDER, REL, REL_INVERSE, cx } from '../lib/ui'
 import { Modal, Field, inputCls } from '../components/Modal'
 import { extractLinks, renderMarkdown } from '../lib/markdown'
+import { exportDocToPdf } from '../lib/exportPdf'
 import type { Bot, DocRelation, DocStatus, DocType, RelType, WikiDoc } from '../types'
 
 const DOC_STATUSES: DocStatus[] = ['draft', 'review', 'approved', 'archived']
@@ -813,6 +815,18 @@ function DocDetail({
             )}
           >
             <History size={14} /> 版本历史 · {doc.versions.length}
+          </button>
+          <button
+            onClick={() => exportDocToPdf({
+              title: doc.title,
+              meta: `${productName} · 产品 ${shown.productVersion} · ${owner ? owner.name : '未指派负责人'} · ${fmtDate(shown.createdAt)} · ${shown.version}`,
+              content: shown.content,
+              titleBySlug,
+            })}
+            title="导出为 PDF（弹出打印框，选『另存为 PDF』）"
+            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 ring-1 ring-slate-200 transition hover:bg-slate-50"
+          >
+            <FileDown size={14} /> 导出 PDF
           </button>
           <button
             onClick={onDelete}
