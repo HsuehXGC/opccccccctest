@@ -29,6 +29,15 @@ function Say($m){ Write-Host "› $m" -ForegroundColor Cyan }
 function OK ($m){ Write-Host "✓ $m" -ForegroundColor Green }
 function Warn($m){ Write-Host "! $m" -ForegroundColor Yellow }
 function Die($m){ Write-Host "✗ $m" -ForegroundColor Red; exit 1 }
+# 跑原生命令（npm/claude 等）：经 cmd.exe 合并 stderr，避免 $ErrorActionPreference='Stop'
+# 把 stderr 文本（如 npm notice）误判成 NativeCommandError 终止错误；返回退出码 + 文本。
+function Exec($cmdline) {
+  $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+  $out = & cmd.exe /d /c "$cmdline 2>&1" | Out-String
+  $code = $LASTEXITCODE
+  $ErrorActionPreference = $old
+  return [pscustomobject]@{ Code = $code; Out = $out }
+}
 
 Write-Host "`n── OPC 一键接入（Windows）─────────────────────────`n" -ForegroundColor Magenta
 
@@ -72,24 +81,27 @@ if ((Get-Command node -ErrorAction SilentlyContinue) -and ([int](NodeMajor) -ge 
 
 # ── 2. claude CLI ──────────────────────────────────────────
 if (Get-Command claude -ErrorAction SilentlyContinue) {
-  OK "已有 claude（$((& claude.cmd --version) 2>$null | Select-Object -First 1)）"
+  OK "已有 claude（$((Exec 'claude.cmd --version').Out.Trim())）"
 } else {
-  Say "安装 claude CLI（@anthropic-ai/claude-code）…"
-  # 走 npm.cmd（不受执行策略约束，规避 npm.ps1 被 GPO 拦）
-  & npm.cmd install -g '@anthropic-ai/claude-code' 2>&1 | Out-Null
-  if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { Die "npm 安装 claude 失败，请检查网络后重试。" }
+  Say "安装 claude CLI（@anthropic-ai/claude-code，约 1-2 分钟）…"
+  # 经 cmd.exe 跑 npm.cmd：不受执行策略约束，且 stderr 的 npm notice 不会被误判成错误
+  $r = Exec 'npm.cmd install -g @anthropic-ai/claude-code'
+  if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+    Die "npm 安装 claude 失败（退出码 $($r.Code)）：`n$($r.Out)"
+  }
   OK "已装 claude"
 }
 
 # ── 3. claude 登录（你点一下）──────────────────────────────
 Say "检查 claude 登录状态…"
-$loggedIn = $false
-try { & claude.cmd -p "reply with the single word OK" *>$null; if ($LASTEXITCODE -eq 0) { $loggedIn = $true } } catch {}
+$loggedIn = (Exec 'claude.cmd -p "reply with the single word OK"').Code -eq 0
 if ($loggedIn) {
   OK "claude 已登录，可直接干活"
 } else {
   Warn "claude 尚未登录。浏览器会弹出授权页，同意即可（完成后回到这个窗口）。"
+  $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
   try { & claude.cmd login } catch { Warn "claude login 未完成——先继续装服务，稍后可再跑 'claude login' 补登录。" }
+  $ErrorActionPreference = $old
 }
 
 # ── 4. 下载 opc-agent ──────────────────────────────────────
