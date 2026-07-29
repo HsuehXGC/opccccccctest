@@ -340,7 +340,10 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
 
   // 项目级知识库：覆盖项目下全部产品，作为会议完整背景（聚焦选中产品）
   const project = projects.find((p) => p.id === meeting.projectId)
-  const projectProducts = products.filter((p) => p.projectId === meeting.projectId)
+  const strictProducts = products.filter((p) => p.projectId === meeting.projectId)
+  // 兜底：会议 projectId 为空（历史遗留：建会议早于建项目）或该项目下暂无产品时，
+  // 回退到本账户组全部产品，避免「会议存文档 / 派任务」时选不到刚建的产品。
+  const projectProducts = strictProducts.length > 0 ? strictProducts : products
   const projectProductIds = new Set(projectProducts.map((p) => p.id))
   const knowledge = buildProjectKnowledge({
     projectName: project?.name ?? '（未知项目）',
