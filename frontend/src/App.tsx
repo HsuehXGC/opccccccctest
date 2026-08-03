@@ -130,10 +130,9 @@ export function App() {
       {/* 侧边栏 */}
       <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white">
         <div className="flex items-center gap-2.5 px-5 py-5">
-          <img src="/logo.svg" alt="OPC" className="h-8 w-8" />
+          <img src="/logo.svg" alt="Navo7" className="h-8 w-8" />
           <div>
-            <div className="text-[15px] font-bold leading-none">OPC</div>
-            <div className="mt-1 text-[11px] text-slate-400">虚拟人力中枢</div>
+            <div className="text-[15px] font-bold leading-none tracking-tight">Navo7</div>
           </div>
         </div>
 

@@ -19,6 +19,8 @@ import {
 // 生产应从环境变量注入 secret；此处开发默认值仅供演示。
 const SECRET = process.env.OPC_JWT_SECRET || 'opc-dev-secret-change-me'
 const TTL = '7d'
+// 注册邀请码：只有拿到码的人能注册，挡住外人。可用环境变量 OPC_INVITE_CODE 覆盖默认值。
+const INVITE_CODE = process.env.OPC_INVITE_CODE || 'NAVO7-2026'
 
 interface JwtPayload {
   sub: string
@@ -72,10 +74,11 @@ export function verifyEnrollToken(token: string): { orgId: string } | null {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 // ── 高层操作 ────────────────────────────────────────────
-export function registerRoot(input: { name: string; email: string; password: string }): { token: string; user: SafeUser } {
+export function registerRoot(input: { name: string; email: string; password: string; invite?: string }): { token: string; user: SafeUser } {
   const name = input.name?.trim()
   const email = input.email?.trim().toLowerCase()
   const password = input.password ?? ''
+  if ((input.invite ?? '').trim() !== INVITE_CODE) throw new Error('邀请码不正确，无法注册')
   if (!name) throw new Error('姓名必填')
   if (!EMAIL_RE.test(email)) throw new Error('邮箱格式不正确')
   if (password.length < 6) throw new Error('密码至少 6 位')

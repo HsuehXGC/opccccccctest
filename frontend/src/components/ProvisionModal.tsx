@@ -7,7 +7,7 @@ import { Modal, Field, inputCls } from './Modal'
 import { toast } from '../lib/toast'
 
 const STACKS: { key: string; label: string }[] = [
-  { key: 'auto', label: '让 OPC 决定（按描述+机器工具链选）' },
+  { key: 'auto', label: '让 Navo7 决定（按描述+机器工具链选）' },
   { key: '静态站（纯 HTML/CSS/JS）', label: '静态站（纯 HTML/CSS/JS，零依赖）' },
   { key: 'Vite + React + TypeScript', label: 'Vite + React + TS（现代前端站）' },
   { key: 'Next.js', label: 'Next.js（带路由的 React 站）' },
@@ -18,7 +18,7 @@ const STACKS: { key: string; label: string }[] = [
 
 const sec = (out: string, name: string) => (out.match(new RegExp(`===${name}===\\s*\\n?([^\\n=]*)`))?.[1] ?? '').trim()
 
-// 让 OPC 在执行器机器上「git init 新仓库 + 脚手架初始代码 + 自动填工作区」
+// 让 Navo7 在执行器机器上「git init 新仓库 + 脚手架初始代码 + 自动填工作区」
 export function ProvisionModal({ projectId, projectName, onClose }: { projectId: string; projectName: string; onClose: () => void }) {
   const setProjectWorkspace = useStore((s) => s.setProjectWorkspace)
   const token = useAuth((s) => s.token)
@@ -69,7 +69,7 @@ export function ProvisionModal({ projectId, projectName, onClose }: { projectId:
       if (!init.ok || !repoPath) throw new Error('建仓库失败：' + (init.error || init.output).slice(-200))
 
       // 2. 脚手架（claude 在新仓库里生成初始代码并提交）
-      setPhase('scaffold'); setMsg('OPC 正在脚手架初始代码（这一步可能 1–3 分钟）…')
+      setPhase('scaffold'); setMsg('Navo7 正在脚手架初始代码（这一步可能 1–3 分钟）…')
       const stackReq = stack === 'auto'
         ? '选一个**适合上述描述、且这台机器已装好工具链（有 node/npm、java17+maven、python3）的简单栈**'
         : `使用 **${stack}**`
@@ -118,7 +118,7 @@ export function ProvisionModal({ projectId, projectName, onClose }: { projectId:
   return (
     <Modal open onClose={busy ? () => {} : onClose} title={`AI 新建代码 · ${projectName}`}>
       <div className="mb-3 rounded-lg bg-brand-soft/50 px-3 py-2 text-[12px] text-slate-600">
-        OPC 会在执行器机器上 <b>git init 一个全新仓库、脚手架出初始代码并提交</b>，再自动填好工作区——不碰 GitHub、不用你本地操作。之后即可自驾迭代。
+        Navo7 会在执行器机器上 <b>git init 一个全新仓库、脚手架出初始代码并提交</b>，再自动填好工作区——不碰 GitHub、不用你本地操作。之后即可自驾迭代。
       </div>
       {machines.length === 0 ? (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 ring-1 ring-amber-200">没有在线执行器。先在一台装好 claude + 工具链的机器上启动 agent（团队与账户 → 本地算力 → 绑定电脑）。</p>

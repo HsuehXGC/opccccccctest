@@ -59,7 +59,7 @@ function Autopilot() {
     if (!token || !currentProjectId || !goal.trim()) return
     try {
       await authApi.runAutopilot(token, { projectId: currentProjectId, goal: goal.trim(), feedback: feedback.trim() })
-      toast('自驾已启动，OPC 开始规划本轮…', 'success')
+      toast('自驾已启动，Navo7 开始规划本轮…', 'success')
       setGoal('')
       setTimeout(load, 800)
     } catch (err) {
@@ -80,13 +80,13 @@ function Autopilot() {
 
   return (
     <div className="mb-6 rounded-2xl border border-brand/30 bg-brand-soft/30 p-5">
-      <div className="mb-3 flex items-center gap-2 text-sm font-bold text-brand"><Bot size={16} /> OPC 自驾 · {project?.name}</div>
+      <div className="mb-3 flex items-center gap-2 text-sm font-bold text-brand"><Bot size={16} /> Navo7 自驾 · {project?.name}</div>
       {it && (it.status === 'awaiting_review' || it.status === 'error') && (
         <div className={cx('mb-3 rounded-xl border p-3', it.status === 'error' ? 'border-rose-200 bg-rose-50/60' : 'border-emerald-200 bg-emerald-50/60')}>
           {it.status === 'awaiting_review' ? (
             <>
               <div className="mb-1.5 text-sm font-semibold text-emerald-800">本轮已发布 {it.release_ver} · 待你 review</div>
-              <p className="mb-2 text-[12px] text-emerald-700">看下方版本卡的改动与预览。可采纳评审会的下一轮建议，或通过收尾，或自己写反馈让 OPC 据此推进。</p>
+              <p className="mb-2 text-[12px] text-emerald-700">看下方版本卡的改动与预览。可采纳评审会的下一轮建议，或通过收尾，或自己写反馈让 Navo7 据此推进。</p>
               {it.review && (
                 <div className="mb-2 rounded-lg border border-indigo-200 bg-indigo-50/70 p-2.5">
                   <div className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold text-indigo-800">
@@ -113,7 +113,7 @@ function Autopilot() {
               <p className="mb-2 text-[12px] text-rose-700">{it.error}</p>
             </>
           )}
-          <textarea value={reviewFb} onChange={(e) => setReviewFb(e.target.value)} placeholder={it.status === 'error' ? '给点反馈/提示，让 OPC 换个思路重试…' : '评审反馈（可选）：哪里要改、下一轮往哪推进…'}
+          <textarea value={reviewFb} onChange={(e) => setReviewFb(e.target.value)} placeholder={it.status === 'error' ? '给点反馈/提示，让 Navo7 换个思路重试…' : '评审反馈（可选）：哪里要改、下一轮往哪推进…'}
             className="mb-2 h-16 w-full resize-y rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-brand" />
           <div className="flex gap-2">
             {it.status === 'awaiting_review' ? (
@@ -144,7 +144,7 @@ function Autopilot() {
             className="flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
             <Rocket size={15} /> 自驾一轮
           </button>
-          <p className="text-[11px] text-slate-400">OPC 会自己：规划任务 → 派人写代码 → QA 复核 → 集成 → 构建测试 → 发布测试版本。全程关页面也不中断，完成后在下方 review。</p>
+          <p className="text-[11px] text-slate-400">Navo7 会自己：规划任务 → 派人写代码 → QA 复核 → 集成 → 构建测试 → 发布测试版本。全程关页面也不中断，完成后在下方 review。</p>
         </div>
       )}
       {it && (
@@ -295,7 +295,7 @@ export function Releases() {
       <header className="mb-6 flex items-end justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">发布 · 测试版本</h1>
-          <p className="mt-1 text-sm text-slate-500">OPC 每轮集成后构建出的测试版本。你在这里 review 已发布版本，任务级不用管。</p>
+          <p className="mt-1 text-sm text-slate-500">Navo7 每轮集成后构建出的测试版本。你在这里 review 已发布版本，任务级不用管。</p>
         </div>
         <button onClick={load} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-500 hover:bg-slate-50">
           <RefreshCw size={14} /> 刷新
@@ -309,7 +309,7 @@ export function Releases() {
       ) : jobs.length === 0 ? (
         <div className="rounded-2xl border-2 border-dashed border-slate-200 py-16 text-center">
           <Rocket size={28} className="mx-auto mb-3 text-slate-300" />
-          <p className="text-sm text-slate-400">还没有发布。去「任务看板」点「发布测试版本」，OPC 会集成、构建并在这里列出。</p>
+          <p className="text-sm text-slate-400">还没有发布。去「任务看板」点「发布测试版本」，Navo7 会集成、构建并在这里列出。</p>
         </div>
       ) : (
         <div className="space-y-4">

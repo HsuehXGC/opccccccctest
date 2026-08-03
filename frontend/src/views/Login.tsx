@@ -17,13 +17,14 @@ export function Login() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [invite, setInvite] = useState('')
 
   const isRegister = mode === 'register'
 
   async function submit() {
     if (isRegister) {
-      if (!name.trim() || !email.trim() || password.length < 6) return
-      await register(name.trim(), email.trim(), password)
+      if (!name.trim() || !email.trim() || password.length < 6 || !invite.trim()) return
+      await register(name.trim(), email.trim(), password, invite.trim())
     } else {
       if (!email.trim() || !password) return
       await login(email.trim(), password)
@@ -40,10 +41,9 @@ export function Login() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="mb-6 flex flex-col items-center gap-2.5">
-          <img src="/logo.svg" alt="OPC" className="h-11 w-11" />
+          <img src="/logo.svg" alt="Navo7" className="h-11 w-11" />
           <div className="text-center">
-            <div className="text-lg font-bold leading-none">OPC · 虚拟人力中枢</div>
-            <div className="mt-1.5 text-xs text-slate-400">让一个人管理多个 Claude CLI 机器人</div>
+            <div className="text-xl font-bold leading-none tracking-tight">Navo7</div>
           </div>
         </div>
 
@@ -92,6 +92,17 @@ export function Login() {
                 placeholder="••••••••"
               />
             </div>
+            {isRegister && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">邀请码</label>
+                <input
+                  className={inputCls}
+                  value={invite}
+                  onChange={(e) => setInvite(e.target.value)}
+                  placeholder="仅限受邀注册"
+                />
+              </div>
+            )}
 
             {error && (
               <div className="flex items-center gap-1.5 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700 ring-1 ring-rose-200">

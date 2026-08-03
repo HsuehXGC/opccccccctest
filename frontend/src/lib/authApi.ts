@@ -33,7 +33,7 @@ async function req<T>(path: string, opts: { method?: string; body?: unknown; tok
 }
 
 export const authApi = {
-  register: (body: { name: string; email: string; password: string }) =>
+  register: (body: { name: string; email: string; password: string; invite?: string }) =>
     req<{ token: string; user: AuthUser }>('/auth/register', { method: 'POST', body }),
   login: (body: { email: string; password: string }) =>
     req<{ token: string; user: AuthUser }>('/auth/login', { method: 'POST', body }),

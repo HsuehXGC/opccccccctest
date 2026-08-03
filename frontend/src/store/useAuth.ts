@@ -18,7 +18,7 @@ interface AuthState {
   busy: boolean
 
   login: (email: string, password: string) => Promise<boolean>
-  register: (name: string, email: string, password: string) => Promise<boolean>
+  register: (name: string, email: string, password: string, invite: string) => Promise<boolean>
   logout: () => void
   loadMe: () => Promise<void>
   loadOrgUsers: () => Promise<void>
@@ -57,10 +57,10 @@ export const useAuth = create<AuthState>()(
         }
       },
 
-      register: async (name, email, password) => {
+      register: async (name, email, password, invite) => {
         set({ busy: true, error: null })
         try {
-          const { token, user } = await authApi.register({ name, email, password })
+          const { token, user } = await authApi.register({ name, email, password, invite })
           enterWorkspace(user.orgId)
           set({ token, user, status: 'authed', busy: false })
           void get().loadOrgUsers()
