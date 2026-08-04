@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
-import { KeyRound, Plus, Copy, Trash2, Loader2, ShieldAlert, Check, Terminal } from 'lucide-react'
+import { KeyRound, Plus, Copy, Trash2, Loader2, ShieldAlert, Check, Terminal, BookOpen } from 'lucide-react'
 import { useAuth } from '../store/useAuth'
 import { authApi, type ApiKey } from '../lib/authApi'
+import { renderMarkdown } from '../lib/markdown'
+import { Modal } from './Modal'
 import { cx } from '../lib/ui'
 import { toast } from '../lib/toast'
+import API_DOC from '../lib/apiDoc.md?raw'
 
 const fmt = (t: number | null) => (t ? new Date(t).toLocaleString() : '—')
 
@@ -19,6 +22,7 @@ export function ApiGateway() {
   const [fresh, setFresh] = useState<string | null>(null) // 刚生成的明文 secret（仅此一次）
   const [copied, setCopied] = useState<string | null>(null)
   const [revoking, setRevoking] = useState<string | null>(null)
+  const [docOpen, setDocOpen] = useState(false)
 
   async function load() {
     try { setKeys((await authApi.apiKeys(token)).keys) } catch { /* 忽略 */ } finally { setLoading(false) }
@@ -57,6 +61,12 @@ export function ApiGateway() {
           <KeyRound size={10} /> OpenAI 兼容
         </span>
         {loading && <Loader2 size={13} className="animate-spin text-slate-300" />}
+        <button
+          onClick={() => setDocOpen(true)}
+          className="ml-auto flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
+        >
+          <BookOpen size={13} /> 接入文档
+        </button>
       </div>
       <p className="mb-3 text-xs text-slate-400">
         把你绑定的本地算力开放成标准接口：第三方用你签发的 Key 调 OpenAI 兼容的 <code className="rounded bg-slate-100 px-1">/v1/chat/completions</code>，请求会路由到你<b>在线的机器</b>上真跑 claude 并返回。可直接用 OpenAI SDK（改 base_url + key）。
@@ -155,6 +165,15 @@ export function ApiGateway() {
             </div>
           ))}
         </div>
+      )}
+
+      {docOpen && (
+        <Modal open onClose={() => setDocOpen(false)} title="对外 API 接入文档" wide>
+          <div
+            className="prose prose-slate prose-sm max-w-none prose-headings:font-semibold prose-pre:bg-slate-900 prose-pre:text-slate-100 prose-table:text-sm"
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(API_DOC, new Map()) }}
+          />
+        </Modal>
       )}
     </section>
   )

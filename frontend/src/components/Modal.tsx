@@ -6,11 +6,14 @@ export function Modal({
   onClose,
   title,
   children,
+  wide,
 }: {
   open: boolean
   onClose: () => void
   title: string
   children: ReactNode
+  /** 宽版（用于文档等长内容），默认 max-w-lg */
+  wide?: boolean
 }) {
   if (!open) return null
   return (
@@ -19,7 +22,7 @@ export function Modal({
       onClick={onClose}
     >
       <div
-        className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-2xl bg-white shadow-xl"
+        className={`flex max-h-[90vh] w-full flex-col rounded-2xl bg-white shadow-xl ${wide ? 'max-w-3xl' : 'max-w-lg'}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-5 py-4">

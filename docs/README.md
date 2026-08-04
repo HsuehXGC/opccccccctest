@@ -9,6 +9,7 @@
 | [需求文档](requirements.md) | 产品定位、术语、功能与非功能需求、里程碑 |
 | [架构文档](architecture.md) | 总体架构、分层、多租户模型、内网接入、数据流 |
 | [接口文档](api.md) | 后端 REST 接口、Agent 协议、SSE 事件流 |
+| [对外 API 接入](public-api.md) | 把本地算力暴露成 OpenAI 兼容接口，供第三方调用（受限/代理模式、示例、错误码） |
 | [数据库设计](database.md) | 现状（内存 mock）与 M3 目标关系模型（PostgreSQL） |
 | [运维说明](operations.md) | 开发/构建/部署、Agent 分发、环境变量、安全运维 |
 
