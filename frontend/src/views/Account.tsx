@@ -5,6 +5,7 @@ import { useAuth } from '../store/useAuth'
 import { Avatar, cx } from '../lib/ui'
 import { Modal, Field, inputCls } from '../components/Modal'
 import { LocalCompute } from '../components/LocalCompute'
+import { ApiGateway } from '../components/ApiGateway'
 import { CloudSync } from '../components/CloudSync'
 import { ProvisionModal } from '../components/ProvisionModal'
 import { toast } from '../lib/toast'
@@ -250,6 +251,9 @@ export function AccountView() {
 
       {/* 本地算力（真实 agent 接入）*/}
       <LocalCompute />
+
+      {/* 对外 API：把本地算力暴露给第三方调用 */}
+      <ApiGateway />
 
       {/* 绑定成员 */}
       {addingMember && (

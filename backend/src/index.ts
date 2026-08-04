@@ -12,6 +12,7 @@ import { importSnapshot, applyDeletes, getOrgState, orgHasData } from './stateSt
 import { orchestrateMeeting, getMeeting, isMeetingRunning, orgHasExecutor, recoverMeetings, type MeetingRunPayload } from './meetingRunner.ts'
 import { addBusConn, notifyOrg } from './bus.ts'
 import { isInternal, setInternal } from './internalMachines.ts'
+import { createApiKey, listApiKeys, revokeApiKey, resolveApiKey } from './apiKeys.ts'
 import { runIteration, getIteration, isProjectRunning, reviewIteration } from './autopilot.ts'
 import { secretaryChat, getSecretaryTranscript } from './secretary.ts'
 import {
@@ -254,6 +255,120 @@ app.post('/api/agent/run-stream', requireAuth, (req: AuthedRequest, res) => {
     clearTimeout(idle)
     gateway.off('job', onJob)
   })
+})
+
+// ── 对外 API：把本地算力的 claude 暴露成 OpenAI 兼容接口 ─────────────
+// 用户签发 API key → 第三方用 key 调 /v1/chat/completions → 路由到该 org 的在线 claude 执行器。
+
+// 为某 org 选一个在线 claude 执行器（排除隐藏算力；优先空闲）
+function pickOrgClaudeExecutor(orgId: string): string | null {
+  const execs = gateway
+    .listMachines()
+    .filter((m) => m.accountId === orgId && m.online && !isInternal(orgId, m.machine.name))
+    .flatMap((m) => m.executors)
+    .filter((e) => e.kind === 'claude')
+  return (execs.find((e) => e.status === 'idle') ?? execs[0])?.id ?? null
+}
+
+const contentText = (c: unknown): string =>
+  typeof c === 'string'
+    ? c
+    : Array.isArray(c)
+      ? c.map((p) => (p && typeof p === 'object' && 'text' in (p as object) ? String((p as { text: unknown }).text) : '')).join('')
+      : ''
+
+function messagesToPrompt(messages: Array<{ role?: string; content?: unknown }>): string {
+  if (!Array.isArray(messages)) return ''
+  const sys = messages.filter((m) => m.role === 'system').map((m) => contentText(m.content)).filter(Boolean).join('\n')
+  const convo = messages.filter((m) => m.role !== 'system')
+  const onlyUser = convo.length === 1 && convo[0].role === 'user'
+  const body = onlyUser
+    ? contentText(convo[0].content)
+    : convo.map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${contentText(m.content)}`).join('\n\n')
+  return (sys ? sys + '\n\n' : '') + body
+}
+const approxTokens = (s: string) => Math.max(1, Math.ceil((s || '').length / 4))
+function apiKeyFromReq(req: express.Request): string | null {
+  const auth = req.header('authorization')
+  if (auth && /^Bearer\s+/i.test(auth)) return auth.replace(/^Bearer\s+/i, '').trim()
+  return req.header('x-api-key') || null
+}
+
+// 管理：签发 / 列表 / 撤销（登录用户 token）
+app.post('/api/api-keys', requireAuth, (req: AuthedRequest, res) => {
+  const { secret, record } = createApiKey(req.auth!.user.orgId, String(req.body?.name ?? ''))
+  res.json({ ok: true, secret, key: record }) // secret 明文仅此一次返回
+})
+app.get('/api/api-keys', requireAuth, (req: AuthedRequest, res) => {
+  res.json({ keys: listApiKeys(req.auth!.user.orgId) })
+})
+app.delete('/api/api-keys/:id', requireAuth, (req: AuthedRequest, res) => {
+  const ok = revokeApiKey(req.auth!.user.orgId, String(req.params.id))
+  res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'key 不存在' })
+})
+
+// 公开：OpenAI 兼容模型列表
+app.get('/v1/models', (req, res) => {
+  if (!resolveApiKey(apiKeyFromReq(req))) return res.status(401).json({ error: { message: '无效的 API key', type: 'invalid_request_error' } })
+  res.json({ object: 'list', data: [{ id: 'navo7-local', object: 'model', created: 0, owned_by: 'navo7' }] })
+})
+
+// 公开：OpenAI 兼容 chat completions —— 路由到用户本地算力上的 claude
+app.post('/v1/chat/completions', async (req, res) => {
+  const rec = resolveApiKey(apiKeyFromReq(req))
+  if (!rec) return res.status(401).json({ error: { message: '无效或已撤销的 API key', type: 'invalid_request_error' } })
+  const body = req.body ?? {}
+  const model = typeof body.model === 'string' && body.model ? body.model : 'navo7-local'
+  const prompt = messagesToPrompt(body.messages ?? [])
+  if (!prompt.trim()) return res.status(400).json({ error: { message: 'messages 为空或格式不正确', type: 'invalid_request_error' } })
+  const executorId = pickOrgClaudeExecutor(rec.orgId)
+  if (!executorId) return res.status(503).json({ error: { message: '该账户暂无在线本地算力（claude 执行器）', type: 'server_error' } })
+
+  const id = 'chatcmpl-' + Math.random().toString(36).slice(2, 12)
+  const created = Math.floor(Date.now() / 1000)
+
+  if (body.stream !== true) {
+    try {
+      const { result } = await gateway.runJob(executorId, prompt, undefined, 600_000)
+      const content = String(result ?? '')
+      res.json({
+        id, object: 'chat.completion', created, model,
+        choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: approxTokens(prompt), completion_tokens: approxTokens(content), total_tokens: approxTokens(prompt) + approxTokens(content) },
+      })
+    } catch (err) {
+      res.status(502).json({ error: { message: (err as Error).message, type: 'server_error' } })
+    }
+    return
+  }
+
+  // 流式：转成 OpenAI chat.completion.chunk SSE
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
+  const emit = (obj: unknown) => res.write(`data: ${JSON.stringify(obj)}\n\n`)
+  const chunk = (delta: Record<string, unknown>, finish: string | null = null) =>
+    emit({ id, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta, finish_reason: finish }] })
+  const doneMarker = () => res.write('data: [DONE]\n\n') // OpenAI 约定：裸 [DONE]，不加引号
+  let jobId = ''
+  let sent = false
+  let idle: NodeJS.Timeout
+  const arm = () => { clearTimeout(idle); idle = setTimeout(() => { chunk({}, 'stop'); doneMarker(); fin() }, 180_000) }
+  const fin = () => { clearTimeout(idle); gateway.off('job', onJob); if (!res.writableEnded) res.end() }
+  const onJob = (e: { type: string; jobId: string; text?: string; result?: string; error?: string }) => {
+    if (e.jobId !== jobId) return
+    arm()
+    if (e.type === 'chunk') { const t = e.text ?? ''; if (t && !t.startsWith('[agent]')) { sent = true; chunk({ content: t }) } }
+    else if (e.type === 'done') { if (!sent && e.result) chunk({ content: String(e.result) }); chunk({}, 'stop'); doneMarker(); fin() }
+    else if (e.type === 'error') { emit({ error: { message: e.error, type: 'server_error' } }); doneMarker(); fin() }
+  }
+  gateway.on('job', onJob)
+  chunk({ role: 'assistant' }) // 首个 chunk 带 role
+  try {
+    jobId = gateway.dispatch(executorId, prompt).jobId
+  } catch (err) {
+    emit({ error: { message: (err as Error).message, type: 'server_error' } }); doneMarker(); return res.end()
+  }
+  arm()
+  res.on('close', () => { clearTimeout(idle); gateway.off('job', onJob) })
 })
 
 // ── 云端调度 jobs：入队后由后端 worker 常驻执行，关页面不中断 ──────────

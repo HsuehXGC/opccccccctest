@@ -74,6 +74,18 @@ export const authApi = {
     req<{ ok: true }>(`/machines/${machineId}`, { method: 'DELETE', token }),
   setMachineInternal: (token: string, name: string, internal: boolean) =>
     req<{ ok: true }>('/machines/internal', { method: 'POST', body: { name, internal }, token }),
+  // 对外 API key
+  apiKeys: (token: string) => req<{ keys: ApiKey[] }>('/api-keys', { token }),
+  createApiKey: (token: string, name: string) => req<{ ok: true; secret: string; key: ApiKey }>('/api-keys', { method: 'POST', body: { name }, token }),
+  revokeApiKey: (token: string, id: string) => req<{ ok: true }>(`/api-keys/${id}`, { method: 'DELETE', token }),
+}
+
+export interface ApiKey {
+  id: string
+  name: string
+  prefix: string
+  createdAt: number
+  lastUsedAt: number | null
 }
 
 type StreamEvent = { t: 'chunk'; text: string } | { t: 'done'; result: string } | { t: 'error'; error: string }
