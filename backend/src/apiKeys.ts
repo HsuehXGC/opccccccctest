@@ -18,6 +18,8 @@ export interface ApiKeyRecord {
   createdAt: number
   lastUsedAt: number | null
   revoked: boolean
+  /** true=代理模式（可调用工具/执行命令）；false/缺省=受限模式（纯文本、禁工具，默认，给外部用更安全） */
+  agent?: boolean
 }
 export interface PublicApiKey {
   id: string
@@ -25,6 +27,7 @@ export interface PublicApiKey {
   prefix: string
   createdAt: number
   lastUsedAt: number | null
+  agent: boolean
 }
 
 let keys: ApiKeyRecord[] = []
@@ -42,10 +45,10 @@ function persist() {
   }
 }
 const sha = (s: string) => createHash('sha256').update(s).digest('hex')
-const toPublic = (k: ApiKeyRecord): PublicApiKey => ({ id: k.id, name: k.name, prefix: k.prefix, createdAt: k.createdAt, lastUsedAt: k.lastUsedAt })
+const toPublic = (k: ApiKeyRecord): PublicApiKey => ({ id: k.id, name: k.name, prefix: k.prefix, createdAt: k.createdAt, lastUsedAt: k.lastUsedAt, agent: !!k.agent })
 
-/** 新建一把 key；返回明文 secret（仅此一次）+ 公开记录。 */
-export function createApiKey(orgId: string, name: string): { secret: string; record: PublicApiKey } {
+/** 新建一把 key；agent=true 为代理模式（可用工具），默认受限。返回明文 secret（仅此一次）+ 公开记录。 */
+export function createApiKey(orgId: string, name: string, agent = false): { secret: string; record: PublicApiKey } {
   const secret = 'navo7-sk-' + randomBytes(24).toString('hex')
   const rec: ApiKeyRecord = {
     id: 'ak-' + randomBytes(6).toString('hex'),
@@ -56,6 +59,7 @@ export function createApiKey(orgId: string, name: string): { secret: string; rec
     createdAt: Date.now(),
     lastUsedAt: null,
     revoked: false,
+    agent: !!agent,
   }
   keys.push(rec)
   persist()

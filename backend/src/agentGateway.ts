@@ -88,7 +88,7 @@ export class AgentGateway extends EventEmitter {
    * 把任务简报下发到承载指定执行器的机器 agent。
    * dispatch 是「派机器人执行任务」的落点：task.brief → 某执行器上的 claude -p。
    */
-  dispatch(executorId: string, prompt: string, cwd?: string, mode?: 'plan', cmd?: string): { jobId: string; machineId: string } {
+  dispatch(executorId: string, prompt: string, cwd?: string, mode?: 'plan' | 'safe', cmd?: string): { jobId: string; machineId: string } {
     const hit = this.findExecutor(executorId)
     if (!hit) throw new Error(`执行器 ${executorId} 不在线`)
     const { agent, executor } = hit
@@ -102,7 +102,7 @@ export class AgentGateway extends EventEmitter {
   }
 
   /** 派单并等待完成（同步语义）：收集流式输出，job:done 时 resolve，error/超时 reject */
-  runJob(executorId: string, prompt: string, cwd?: string, timeoutMs = 120_000): Promise<{ jobId: string; result: string }> {
+  runJob(executorId: string, prompt: string, cwd?: string, timeoutMs = 120_000, mode?: 'plan' | 'safe'): Promise<{ jobId: string; result: string }> {
     return new Promise((resolve, reject) => {
       let jobId = ''
       let out = ''
@@ -126,7 +126,7 @@ export class AgentGateway extends EventEmitter {
         clearTimeout(timer)
       }
       try {
-        jobId = this.dispatch(executorId, prompt, cwd).jobId
+        jobId = this.dispatch(executorId, prompt, cwd, mode).jobId
       } catch (err) {
         cleanup()
         reject(err as Error)

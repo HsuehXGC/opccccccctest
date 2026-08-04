@@ -244,7 +244,10 @@ function runJob({ jobId, kind, prompt, cwd, mode, cmd }) {
   // claude 用 stream-json + 部分消息拿逐 token 会话内容；
   // --dangerously-skip-permissions 绕过 headless 下的首次信任/权限提示（否则无人应答会挂起）。
   // 注：--permission-mode plan 在 headless 无人审批会挂起，故不使用；「只讨论不执行」由提示词约束。
-  const CLAUDE_FLAGS = ['--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--dangerously-skip-permissions']
+  // mode='safe'（对外 API 受限模式）：--tools "" 禁用全部工具 → 纯文本、不能在本机执行任何命令；
+  // 再追加系统提示，让 claude 知道自己无工具、直接文字作答（否则会尝试调用被拦的工具，回复变乱）。
+  const SAFE_FLAGS = ['--tools', '', '--append-system-prompt', '你是纯文本助手，没有任何工具，无法执行命令、读写文件或联网。请直接用文字回答用户，不要尝试调用任何工具。']
+  const CLAUDE_FLAGS = ['--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--dangerously-skip-permissions', ...(mode === 'safe' ? SAFE_FLAGS : [])]
   // Windows：shell 命令 → powershell 从 stdin 读；claude prompt → 也从 stdin 灌，
   // 全部避开 cmd/powershell 的引号与多行地狱（Unix 维持原样：直接走命令行参数）。
   let args, stdinData = null

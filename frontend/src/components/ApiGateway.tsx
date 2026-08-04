@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { KeyRound, Plus, Copy, Trash2, Loader2, ShieldAlert, Check, Terminal } from 'lucide-react'
 import { useAuth } from '../store/useAuth'
 import { authApi, type ApiKey } from '../lib/authApi'
+import { cx } from '../lib/ui'
 import { toast } from '../lib/toast'
 
 const fmt = (t: number | null) => (t ? new Date(t).toLocaleString() : '—')
@@ -13,6 +14,7 @@ export function ApiGateway() {
   const [keys, setKeys] = useState<ApiKey[]>([])
   const [loading, setLoading] = useState(true)
   const [name, setName] = useState('')
+  const [agent, setAgent] = useState(false) // 代理模式（可用工具/执行命令）；默认受限
   const [creating, setCreating] = useState(false)
   const [fresh, setFresh] = useState<string | null>(null) // 刚生成的明文 secret（仅此一次）
   const [copied, setCopied] = useState<string | null>(null)
@@ -26,7 +28,7 @@ export function ApiGateway() {
   async function create() {
     setCreating(true)
     try {
-      const r = await authApi.createApiKey(token, name.trim())
+      const r = await authApi.createApiKey(token, name.trim(), agent)
       setFresh(r.secret)
       setName('')
       await load()
@@ -76,9 +78,12 @@ export function ApiGateway() {
       </div>
 
       {/* 安全提示 */}
-      <div className="mb-3 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-[12px] text-amber-800 ring-1 ring-amber-200">
-        <ShieldAlert size={15} className="mt-0.5 shrink-0" />
-        <span>持有 Key 的人可让 claude 在你的机器上执行（含工具/命令），请当作<b>高权限密钥</b>妥善保管；泄露立即在下方撤销。</span>
+      <div className="mb-3 flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-[12px] text-slate-600 ring-1 ring-slate-200">
+        <ShieldAlert size={15} className="mt-0.5 shrink-0 text-slate-400" />
+        <span>
+          默认<b className="text-emerald-700">受限模式</b>：纯文本对话、<b>禁用全部工具</b>，第三方无法在你机器上执行任何命令，可放心对外。
+          仅当你勾选<b className="text-amber-700">代理模式</b>时，该 Key 才能让 claude 调用工具/执行命令——那种 Key 权限极高，只发给完全信任的一方，泄露立即撤销。
+        </span>
       </div>
 
       {/* 刚生成的明文 */}
@@ -96,17 +101,26 @@ export function ApiGateway() {
       )}
 
       {/* 生成 */}
-      <div className="mb-3 flex gap-2">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && !creating && create()}
-          placeholder="给这把 Key 起个名（如：合作方A / 我的脚本）"
-          className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
-        />
-        <button onClick={create} disabled={creating} className="flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60">
-          {creating ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />} 生成 API Key
-        </button>
+      <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3">
+        <div className="flex gap-2">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && !creating && create()}
+            placeholder="给这把 Key 起个名（如：合作方A / 我的脚本）"
+            className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
+          />
+          <button onClick={create} disabled={creating} className="flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60">
+            {creating ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />} 生成 API Key
+          </button>
+        </div>
+        <label className="mt-2.5 flex cursor-pointer items-start gap-2 text-[12px]">
+          <input type="checkbox" checked={agent} onChange={(e) => setAgent(e.target.checked)} className="mt-0.5 accent-amber-600" />
+          <span className={agent ? 'text-amber-700' : 'text-slate-500'}>
+            代理模式（允许该 Key 调用工具 / 在你机器上执行命令）
+            <span className="text-slate-400"> · 不勾即默认「受限」纯文本，更安全</span>
+          </span>
+        </label>
       </div>
 
       {/* 列表 */}
@@ -118,7 +132,12 @@ export function ApiGateway() {
             <div key={k.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-500"><KeyRound size={15} /></span>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold">{k.name}</div>
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm font-semibold">{k.name}</span>
+                  <span className={cx('shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium', k.agent ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700')}>
+                    {k.agent ? '代理 · 可执行' : '受限 · 纯文本'}
+                  </span>
+                </div>
                 <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-slate-400">
                   <span className="font-mono">{k.prefix}</span>
                   <span>建于 {fmt(k.createdAt)}</span>

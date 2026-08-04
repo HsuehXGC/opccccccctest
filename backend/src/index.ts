@@ -296,7 +296,7 @@ function apiKeyFromReq(req: express.Request): string | null {
 
 // 管理：签发 / 列表 / 撤销（登录用户 token）
 app.post('/api/api-keys', requireAuth, (req: AuthedRequest, res) => {
-  const { secret, record } = createApiKey(req.auth!.user.orgId, String(req.body?.name ?? ''))
+  const { secret, record } = createApiKey(req.auth!.user.orgId, String(req.body?.name ?? ''), req.body?.agent === true)
   res.json({ ok: true, secret, key: record }) // secret 明文仅此一次返回
 })
 app.get('/api/api-keys', requireAuth, (req: AuthedRequest, res) => {
@@ -326,10 +326,12 @@ app.post('/v1/chat/completions', async (req, res) => {
 
   const id = 'chatcmpl-' + Math.random().toString(36).slice(2, 12)
   const created = Math.floor(Date.now() / 1000)
+  // 默认受限模式（禁工具、纯文本）；仅「代理模式」key 才放开工具/命令执行
+  const runMode: 'safe' | undefined = rec.agent ? undefined : 'safe'
 
   if (body.stream !== true) {
     try {
-      const { result } = await gateway.runJob(executorId, prompt, undefined, 600_000)
+      const { result } = await gateway.runJob(executorId, prompt, undefined, 600_000, runMode)
       const content = String(result ?? '')
       res.json({
         id, object: 'chat.completion', created, model,
@@ -363,7 +365,7 @@ app.post('/v1/chat/completions', async (req, res) => {
   gateway.on('job', onJob)
   chunk({ role: 'assistant' }) // 首个 chunk 带 role
   try {
-    jobId = gateway.dispatch(executorId, prompt).jobId
+    jobId = gateway.dispatch(executorId, prompt, undefined, runMode).jobId
   } catch (err) {
     emit({ error: { message: (err as Error).message, type: 'server_error' } }); doneMarker(); return res.end()
   }
