@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Search,
   Plus,
@@ -26,6 +26,7 @@ import { useStore } from '../store/useStore'
 import { Avatar, DOC_STATUS, DOC_TYPE, DOC_TYPE_ORDER, REL, REL_INVERSE, cx } from '../lib/ui'
 import { Modal, Field, inputCls } from '../components/Modal'
 import { extractLinks, renderMarkdown } from '../lib/markdown'
+import { renderMermaidIn } from '../lib/mermaid'
 import { exportDocToPdf } from '../lib/exportPdf'
 import type { Bot, DocRelation, DocStatus, DocType, RelType, WikiDoc } from '../types'
 
@@ -50,8 +51,14 @@ function WikiContent({
   onNavigate: (slug: string) => void
 }) {
   const html = useMemo(() => renderMarkdown(content, titleBySlug), [content, titleBySlug])
+  const ref = useRef<HTMLDivElement>(null)
+  // 渲染/更新后，把正文里的 ```mermaid 代码块画成 SVG 图
+  useEffect(() => {
+    if (ref.current) void renderMermaidIn(ref.current)
+  }, [html])
   return (
     <div
+      ref={ref}
       className="prose prose-slate prose-sm max-w-none prose-headings:font-semibold prose-pre:bg-slate-900 prose-pre:text-slate-100 prose-table:text-sm"
       dangerouslySetInnerHTML={{ __html: html }}
       onClick={(e) => {
