@@ -1,4 +1,5 @@
 import { renderMarkdown } from './markdown'
+import { renderMermaidIn } from './mermaid'
 
 // 文档「导出 PDF」：渲染成一份干净的打印版 HTML，塞进隐藏 iframe 调 print()，
 // 用浏览器「另存为 PDF」。矢量输出、中文字体不糊、文字可选，零新依赖。
@@ -30,13 +31,15 @@ body { font: 14px/1.7 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microso
 .prose hr { border: none; border-top: 1px solid #e2e8f0; margin: 16px 0; }
 .prose h1, .prose h2, .prose h3 { page-break-after: avoid; }
 .prose pre, .prose blockquote, .prose table, .prose img { page-break-inside: avoid; }
+.mermaid-figure { margin: 12px 0; text-align: center; page-break-inside: avoid; }
+.mermaid-figure svg { max-width: 100%; height: auto; }
 `
 
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
 }
 
-export function exportDocToPdf(opts: { title: string; meta: string; content: string; titleBySlug: Map<string, string> }): void {
+export async function exportDocToPdf(opts: { title: string; meta: string; content: string; titleBySlug: Map<string, string> }): Promise<void> {
   const body = renderMarkdown(opts.content, opts.titleBySlug)
   // <title> 决定打印对话框里 PDF 的默认文件名
   const html = `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>${esc(opts.title)}</title><style>${PRINT_CSS}</style></head><body><header class="doc-head"><h1>${esc(opts.title)}</h1><div class="doc-meta">${esc(opts.meta)}</div></header><main class="prose">${body}</main></body></html>`
@@ -49,6 +52,13 @@ export function exportDocToPdf(opts: { title: string; meta: string; content: str
   win.document.open()
   win.document.write(html)
   win.document.close()
+  // 打印前，把正文里的 ```mermaid 代码块渲成 SVG 内联进去（否则 PDF 里是代码）
+  try {
+    const container = win.document.querySelector('main') || win.document.body
+    if (container) await renderMermaidIn(container)
+  } catch {
+    /* 渲染失败就退化为代码块，不阻断导出 */
+  }
   // 等布局与字体就绪再打印，打印后移除 iframe
   window.setTimeout(() => {
     try {
@@ -57,5 +67,5 @@ export function exportDocToPdf(opts: { title: string; meta: string; content: str
     } finally {
       window.setTimeout(() => iframe.remove(), 1500)
     }
-  }, 400)
+  }, 300)
 }
