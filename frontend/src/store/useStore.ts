@@ -150,8 +150,10 @@ interface State {
   decomposeRequirement: (requirementId: string) => number
 
   // 机器人
-  deployBot: (input: { name: string; role: BotRole; model: string; skills: string[]; charter?: BotCharter }) => void
+  deployBot: (input: { name: string; role: BotRole; model: string; skills: string[]; charter?: BotCharter; projectIds?: string[] }) => void
   setBotStatus: (botId: string, status: Bot['status']) => void
+  /** 设置员工负责的项目（空数组 = 共享/全部项目） */
+  setBotProjects: (botId: string, projectIds: string[]) => void
   /** 配置岗位说明书 / 提示词 */
   updateBotCharter: (botId: string, charter: BotCharter) => void
 
@@ -533,7 +535,7 @@ export const useStore = create<State>()(
       ),
     })),
 
-  deployBot: ({ name, role, model, skills, charter }) =>
+  deployBot: ({ name, role, model, skills, charter, projectIds }) =>
     set((s) => ({
       bots: [
         ...s.bots,
@@ -548,10 +550,15 @@ export const useStore = create<State>()(
           skills,
           completed: 0,
           avatarSeed: name.toLowerCase(),
+          // 默认落到当前项目（新员工不再自动进所有项目）；显式传入则用传入的
+          projectIds: projectIds ?? (s.currentProjectId ? [s.currentProjectId] : []),
           ...(charter ? { charter } : {}),
         },
       ],
     })),
+
+  setBotProjects: (botId, projectIds) =>
+    set((s) => ({ bots: s.bots.map((b) => (b.id === botId ? { ...b, projectIds } : b)) })),
 
   setBotStatus: (botId, status) =>
     set((s) => ({

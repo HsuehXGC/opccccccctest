@@ -299,4 +299,6 @@ export interface Bot {
   avatarSeed: string
   /** 岗位说明书 / 提示词配置；未设置时用角色默认模板 */
   charter?: BotCharter
+  /** 负责的项目 id；为空/缺省 = 共享（所有项目可见可用），非空 = 仅这些项目 */
+  projectIds?: string[]
 }

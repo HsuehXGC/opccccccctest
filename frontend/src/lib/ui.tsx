@@ -28,6 +28,10 @@ export const BOT_STATUS: Record<BotStatus, { label: string; dot: string; text: s
   offline: { label: '离线', dot: 'bg-slate-400', text: 'text-slate-500' },
 }
 
+// 员工是否属于某项目：projectIds 为空/缺省 = 共享（全部项目），非空 = 仅列出的项目
+export const botInProject = (bot: { projectIds?: string[] }, projectId: string): boolean =>
+  !bot.projectIds || bot.projectIds.length === 0 || bot.projectIds.includes(projectId)
+
 // ── 生命周期阶段 ───────────────────────
 export const DOC_PHASE: { key: DocPhase; label: string; index: string }[] = [
   { key: 'ideate', label: '构想', index: '⓪' },

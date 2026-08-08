@@ -6,7 +6,7 @@ import { authApi, runExecutorStream, type LiveMachine } from '../lib/authApi'
 import { assembleSystemPrompt } from '../lib/botCharter'
 import { assignPrompt, parseAssignments, heuristicAssign } from '../lib/assign'
 import { toast } from '../lib/toast'
-import { Avatar, DOC_TYPE, PriorityBadge, TASK_COLUMNS, cx } from '../lib/ui'
+import { Avatar, DOC_TYPE, PriorityBadge, TASK_COLUMNS, botInProject, cx } from '../lib/ui'
 import type { Task, TaskKind, TaskStatus } from '../types'
 
 // ── 派单执行：任务 → 负责机器人(system prompt) + brief → 真实执行器 ──────────
@@ -160,8 +160,9 @@ function useBlockers(task: Task) {
 function AssignMenu({ task, onClose }: { task: Task; onClose: () => void }) {
   const bots = useStore((s) => s.bots)
   const currentOrgId = useStore((s) => s.currentOrgId)
+  const currentProjectId = useStore((s) => s.currentProjectId)
   const assignTask = useStore((s) => s.assignTask)
-  const available = bots.filter((b) => b.status !== 'offline' && b.orgId === currentOrgId)
+  const available = bots.filter((b) => b.status !== 'offline' && b.orgId === currentOrgId && botInProject(b, currentProjectId))
   return (
     <div
       className="absolute left-0 top-full z-20 mt-1 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg"
@@ -336,6 +337,7 @@ function TaskDrawer({ taskId, onClose }: { taskId: string; onClose: () => void }
   const docs = useStore((s) => s.docs)
   const allBots = useStore((s) => s.bots)
   const currentOrgId = useStore((s) => s.currentOrgId)
+  const currentProjectId = useStore((s) => s.currentProjectId)
   const bots = allBots.filter((b) => b.orgId === currentOrgId)
   const requirements = useStore((s) => s.requirements)
   const updateTask = useStore((s) => s.updateTask)
@@ -517,7 +519,7 @@ function TaskDrawer({ taskId, onClose }: { taskId: string; onClose: () => void }
             >
               <option value="">未指派</option>
               {bots
-                .filter((b) => b.status !== 'offline')
+                .filter((b) => b.status !== 'offline' && botInProject(b, currentProjectId))
                 .map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name} · {b.role}

@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Plus, Pause, Play, Power, Cpu, SlidersHorizontal, Sparkles, Loader2 } from 'lucide-react'
+import { Plus, Pause, Play, Power, Cpu, SlidersHorizontal, Sparkles, Loader2, FolderCog } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useAuth } from '../store/useAuth'
 import { authApi, runExecutorStream, type LiveMachine } from '../lib/authApi'
-import { Avatar, BOT_STATUS, StatusDot, cx } from '../lib/ui'
+import { Avatar, BOT_STATUS, StatusDot, botInProject, cx } from '../lib/ui'
 import { Modal, Field, inputCls } from '../components/Modal'
 import { CharterModal } from '../components/CharterModal'
 import { toast } from '../lib/toast'
@@ -33,6 +33,49 @@ function profileToRolePrompt(profile: string): string {
 
 const ROLES: BotRole[] = ['产品经理', '项目经理', '全栈工程', '前端', '后端', '数据分析', '文案运营', '测试', '调研', '财务分析', '商业分析', '商业策划', '用户研究', 'UI测试']
 const MODELS = ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5']
+
+// 员工「负责项目」标签 + 分配 popover
+function BotProjects({ bot }: { bot: Bot }) {
+  const projects = useStore((s) => s.projects)
+  const setBotProjects = useStore((s) => s.setBotProjects)
+  const [open, setOpen] = useState(false)
+  const ids = bot.projectIds ?? []
+  const shared = ids.length === 0
+  const nameOf = (id: string) => projects.find((p) => p.id === id)?.name ?? id
+  const toggle = (pid: string) => setBotProjects(bot.id, ids.includes(pid) ? ids.filter((x) => x !== pid) : [...ids, pid])
+  return (
+    <div className="relative mt-3">
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">负责项目</span>
+        <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1 text-[11px] font-medium text-brand hover:underline">
+          <FolderCog size={12} /> 分配
+        </button>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {shared ? (
+          <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-amber-200">共享 · 全部项目</span>
+        ) : (
+          ids.map((id) => (
+            <span key={id} className="max-w-full truncate rounded-md bg-brand-soft px-2 py-0.5 text-[11px] font-medium text-brand ring-1 ring-brand/20">{nameOf(id)}</span>
+          ))
+        )}
+      </div>
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-20 mt-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg" onMouseLeave={() => setOpen(false)}>
+          <div className="mb-1 px-1 text-[11px] text-slate-400">勾选负责的项目 · 一个不选 = 共享全部</div>
+          <div className="max-h-44 overflow-y-auto">
+            {projects.map((p) => (
+              <label key={p.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50">
+                <input type="checkbox" checked={ids.includes(p.id)} onChange={() => toggle(p.id)} className="accent-brand" />
+                <span className="truncate">{p.name}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function BotCard({ bot }: { bot: Bot }) {
   const task = useStore((s) => s.tasks.find((t) => t.id === bot.currentTaskId))
@@ -84,6 +127,9 @@ function BotCard({ bot }: { bot: Bot }) {
           </div>
         )}
       </div>
+
+      {/* 负责项目 */}
+      <BotProjects bot={bot} />
 
       {/* 配置提示词 */}
       <button
@@ -140,8 +186,13 @@ function BotCard({ bot }: { bot: Bot }) {
 export function Workforce() {
   const allBots = useStore((s) => s.bots)
   const currentOrgId = useStore((s) => s.currentOrgId)
+  const currentProjectId = useStore((s) => s.currentProjectId)
+  const currentProject = useStore((s) => s.projects.find((p) => p.id === currentProjectId))
   const deployBot = useStore((s) => s.deployBot)
-  const bots = allBots.filter((b) => b.orgId === currentOrgId)
+  const [scope, setScope] = useState<'project' | 'all'>('project')
+  const orgBots = allBots.filter((b) => b.orgId === currentOrgId)
+  // 默认只看「当前项目」的员工（含共享员工）；可切到「全部」看整支队伍
+  const bots = scope === 'all' ? orgBots : orgBots.filter((b) => botInProject(b, currentProjectId))
   const [open, setOpen] = useState(false)
 
   const token = useAuth((s) => s.token)
@@ -216,11 +267,13 @@ export function Workforce() {
 
   return (
     <div className="mx-auto max-w-6xl px-8 py-7">
-      <header className="mb-6 flex items-end justify-between">
+      <header className="mb-4 flex items-end justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">虚拟人力</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {bots.length} 个机器人 · {online} 在岗。每个机器人是一个独立的 Claude CLI 会话。
+            {scope === 'project'
+              ? <>项目「{currentProject?.name ?? '—'}」· {bots.length} 人（含共享）· {online} 在岗</>
+              : <>全部员工 {bots.length} 人 · {online} 在岗</>}
           </p>
         </div>
         <button
@@ -231,11 +284,30 @@ export function Workforce() {
         </button>
       </header>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {bots.map((b) => (
-          <BotCard key={b.id} bot={b} />
+      {/* 范围切换：当前项目 / 全部 */}
+      <div className="mb-6 inline-flex rounded-lg bg-slate-100 p-1 text-sm font-medium">
+        {([['project', `当前项目`], ['all', '全部员工']] as const).map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => setScope(k)}
+            className={cx('rounded-md px-3 py-1 transition', scope === k ? 'bg-white text-brand shadow-sm' : 'text-slate-500 hover:text-slate-700')}
+          >
+            {label}
+          </button>
         ))}
       </div>
+
+      {bots.length === 0 ? (
+        <div className="rounded-2xl border-2 border-dashed border-slate-200 py-12 text-center text-sm text-slate-400">
+          {scope === 'project' ? '这个项目还没分配员工。点「部署机器人」新建，或在「全部员工」里把现有员工分配进来。' : '还没有员工。点「部署机器人」新建。'}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {bots.map((b) => (
+            <BotCard key={b.id} bot={b} />
+          ))}
+        </div>
+      )}
 
       <Modal open={open} onClose={() => { setOpen(false); resetForm() }} title="部署新机器人">
         <div className="mb-4 rounded-xl border border-brand/20 bg-brand-soft/30 p-3">
@@ -302,7 +374,10 @@ export function Workforce() {
             placeholder="React, TypeScript, 系统设计"
           />
         </Field>
-        <div className="mt-5 flex justify-end gap-2">
+        <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
+          新员工默认分配到当前项目「<b>{currentProject?.name ?? '—'}</b>」。部署后可在卡片「负责项目 · 分配」里改，或设为共享（全部项目）。
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
           <button
             onClick={() => { setOpen(false); resetForm() }}
             className="rounded-lg px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100"
