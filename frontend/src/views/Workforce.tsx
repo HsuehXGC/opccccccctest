@@ -6,6 +6,7 @@ import { authApi, runExecutorStream, type LiveMachine } from '../lib/authApi'
 import { Avatar, BOT_STATUS, StatusDot, botInProject, cx } from '../lib/ui'
 import { Modal, Field, inputCls } from '../components/Modal'
 import { CharterModal } from '../components/CharterModal'
+import { AiTeamModal } from '../components/AiTeamModal'
 import { toast } from '../lib/toast'
 import type { Bot, BotRole, BotCharter } from '../types'
 
@@ -190,6 +191,7 @@ export function Workforce() {
   const currentProject = useStore((s) => s.projects.find((p) => p.id === currentProjectId))
   const deployBot = useStore((s) => s.deployBot)
   const [scope, setScope] = useState<'project' | 'all'>('project')
+  const [aiOpen, setAiOpen] = useState(false)
   const orgBots = allBots.filter((b) => b.orgId === currentOrgId)
   // 默认只看「当前项目」的员工（含共享员工）；可切到「全部」看整支队伍
   const bots = scope === 'all' ? orgBots : orgBots.filter((b) => botInProject(b, currentProjectId))
@@ -276,13 +278,23 @@ export function Workforce() {
               : <>全部员工 {bots.length} 人 · {online} 在岗</>}
           </p>
         </div>
-        <button
-          onClick={() => setOpen(true)}
-          className="flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-        >
-          <Plus size={16} /> 部署机器人
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setAiOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand-soft px-3.5 py-2 text-sm font-medium text-brand hover:bg-brand/10"
+          >
+            <Sparkles size={16} /> AI 配置团队
+          </button>
+          <button
+            onClick={() => setOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          >
+            <Plus size={16} /> 部署机器人
+          </button>
+        </div>
       </header>
+
+      {aiOpen && <AiTeamModal onClose={() => setAiOpen(false)} />}
 
       {/* 范围切换：当前项目 / 全部 */}
       <div className="mb-6 inline-flex rounded-lg bg-slate-100 p-1 text-sm font-medium">
