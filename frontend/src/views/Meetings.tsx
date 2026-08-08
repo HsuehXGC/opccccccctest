@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { Users, Plus, Play, Loader2, Send, Sparkles, Trash2, FileText, ArrowLeft, Bot as BotIcon, ClipboardList, ListPlus, AlertTriangle } from 'lucide-react'
+import { Users, Plus, Play, Loader2, Send, Sparkles, Trash2, FileText, ArrowLeft, Bot as BotIcon, ClipboardList, ListPlus, AlertTriangle, Folder as FolderIcon } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useAuth } from '../store/useAuth'
 import { authApi } from '../lib/authApi'
@@ -827,12 +827,22 @@ export function Meetings() {
   const currentOrgId = useStore((s) => s.currentOrgId)
   const currentProjectId = useStore((s) => s.currentProjectId)
   const allProducts = useStore((s) => s.products)
+  const projects = useStore((s) => s.projects)
   const meetings = useStore((s) => s.meetings)
   const removeMeeting = useStore((s) => s.removeMeeting)
 
   const orgBots = allBots.filter((b) => b.orgId === currentOrgId && b.status !== 'offline')
   const products = allProducts.filter((p) => p.projectId === currentProjectId)
-  const projectMeetings = meetings.filter((m) => m.projectId === currentProjectId || (!m.projectId && m.orgId === currentOrgId))
+
+  // 项目筛选：'' = 全部，'none' = 未归类（projectId 为空），否则某项目 id。默认当前项目。
+  const [filter, setFilter] = useState<string>(currentProjectId || '')
+  const orgMeetings = meetings.filter((m) => m.orgId === currentOrgId)
+  const projectMeetings =
+    filter === '' ? orgMeetings
+    : filter === 'none' ? orgMeetings.filter((m) => !m.projectId)
+    : orgMeetings.filter((m) => m.projectId === filter)
+  const projName = (id?: string | null) => projects.find((p) => p.id === id)?.name
+  const hasUnfiled = orgMeetings.some((m) => !m.projectId)
 
   const [creating, setCreating] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
@@ -847,7 +857,7 @@ export function Meetings() {
     }
   }, [focusMeetingId, clearFocusMeeting])
 
-  if (openId && projectMeetings.some((m) => m.id === openId)) {
+  if (openId && orgMeetings.some((m) => m.id === openId)) {
     return <MeetingRoom meetingId={openId} onBack={() => setOpenId(null)} />
   }
 
@@ -858,23 +868,41 @@ export function Meetings() {
           <h1 className="text-2xl font-bold tracking-tight">会议</h1>
           <p className="mt-1 text-sm text-slate-500">虚拟人力（CLI plan 模式）+ 你，为立项/变更群聊讨论，产品经理会后整理出执行计划与纪要。</p>
         </div>
-        <button
-          onClick={() => setCreating(true)}
-          className="flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-        >
-          <Plus size={16} /> 发起会议
-        </button>
+        <div className="flex items-center gap-2">
+          {/* 项目筛选 */}
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-600 outline-none focus:border-brand"
+            title="按项目筛选会议"
+          >
+            <option value="">全部项目（{orgMeetings.length}）</option>
+            {projects.map((p) => {
+              const n = orgMeetings.filter((m) => m.projectId === p.id).length
+              return <option key={p.id} value={p.id}>{p.name}（{n}）</option>
+            })}
+            {hasUnfiled && <option value="none">未归类（{orgMeetings.filter((m) => !m.projectId).length}）</option>}
+          </select>
+          <button
+            onClick={() => setCreating(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          >
+            <Plus size={16} /> 发起会议
+          </button>
+        </div>
       </header>
 
       {projectMeetings.length === 0 ? (
         <div className="rounded-2xl border-2 border-dashed border-slate-200 py-16 text-center">
           <Users size={28} className="mx-auto mb-3 text-slate-300" />
-          <p className="text-sm text-slate-400">还没有会议。点「发起会议」，召集虚拟人力开一次立项/变更会。</p>
+          <p className="text-sm text-slate-400">
+            {filter === '' ? '还没有会议。点「发起会议」，召集虚拟人力开一次立项/变更会。' : '这个筛选下还没有会议。换个项目，或点「发起会议」。'}
+          </p>
         </div>
       ) : (
         <div className="space-y-3">
           {projectMeetings.map((m) => (
-            <MeetingListItem key={m.id} meeting={m} onOpen={() => setOpenId(m.id)} onRemove={() => removeMeeting(m.id)} />
+            <MeetingListItem key={m.id} meeting={m} projectName={projName(m.projectId)} onOpen={() => setOpenId(m.id)} onRemove={() => removeMeeting(m.id)} />
           ))}
         </div>
       )}
@@ -894,7 +922,7 @@ export function Meetings() {
   )
 }
 
-function MeetingListItem({ meeting, onOpen, onRemove }: { meeting: Meeting; onOpen: () => void; onRemove: () => void }) {
+function MeetingListItem({ meeting, projectName, onOpen, onRemove }: { meeting: Meeting; projectName?: string; onOpen: () => void; onRemove: () => void }) {
   const bots = useStore((s) => s.bots)
   const participants = meeting.participantBotIds.map((id) => bots.find((b) => b.id === id)).filter((b): b is Bot => !!b)
   return (
@@ -911,6 +939,9 @@ function MeetingListItem({ meeting, onOpen, onRemove }: { meeting: Meeting; onOp
             {meeting.status === 'running' && <span className="shrink-0 rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">进行中</span>}
           </div>
           <div className="mt-1 flex items-center gap-3 text-xs text-slate-400">
+            <span className={cx('flex items-center gap-1 rounded px-1.5 py-0.5 font-medium', projectName ? 'bg-brand-soft text-brand' : 'bg-slate-100 text-slate-400')}>
+              <FolderIcon size={11} /> {projectName ?? '未归类'}
+            </span>
             <span className="flex items-center gap-1"><BotIcon size={12} /> {participants.length} 位参会</span>
             <span className="flex items-center gap-1"><FileText size={12} /> {meeting.messages.length} 条发言</span>
             {meeting.output && <span className="flex items-center gap-1 text-emerald-600"><Sparkles size={12} /> 已出计划</span>}
