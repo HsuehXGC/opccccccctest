@@ -16,6 +16,8 @@ import {
   LayoutGrid,
   Trash2,
   Maximize2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Minimize2,
   MessagesSquare,
   Target,
@@ -460,6 +462,8 @@ export function Wiki() {
   const [previewVersion, setPreviewVersion] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [creating, setCreating] = useState<{ type?: DocType; title?: string; slug?: string } | null>(null)
+  const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem('navo7-wiki-panel') !== '0')
+  const togglePanel = () => setPanelOpen((v) => { localStorage.setItem('navo7-wiki-panel', v ? '0' : '1'); return !v })
 
   const botById = useMemo(() => new Map(bots.map((b) => [b.id, b])), [bots])
   const titleBySlug = useMemo(() => new Map(docs.map((d) => [d.slug, d.title])), [docs])
@@ -501,17 +505,29 @@ export function Wiki() {
 
   return (
     <div className="flex h-full">
+      {/* 收起态：细展开条 */}
+      {!panelOpen && (
+        <button onClick={togglePanel} title="展开文档列表" className="flex w-8 shrink-0 items-center justify-center border-r border-slate-200 bg-white text-slate-400 hover:bg-slate-50 hover:text-slate-600">
+          <PanelLeftOpen size={16} />
+        </button>
+      )}
       {/* 文档列表 + 蓝图 */}
+      {panelOpen && (
       <div className="flex w-72 shrink-0 flex-col border-r border-slate-200 bg-white">
         <div className="border-b border-slate-100 p-3">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-sm font-semibold">产品文档</span>
-            <button
-              onClick={() => setCreating({})}
-              className="flex items-center gap-1 rounded-lg bg-brand px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700"
-            >
-              <Plus size={13} /> 新建
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setCreating({})}
+                className="flex items-center gap-1 rounded-lg bg-brand px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+              >
+                <Plus size={13} /> 新建
+              </button>
+              <button onClick={togglePanel} title="收起文档列表" className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                <PanelLeftClose size={15} />
+              </button>
+            </div>
           </div>
           {/* 产品切换 */}
           <select
@@ -562,6 +578,7 @@ export function Wiki() {
           ))}
         </div>
       </div>
+      )}
 
       {/* 文档正文 */}
       <div className="flex-1 overflow-y-auto">

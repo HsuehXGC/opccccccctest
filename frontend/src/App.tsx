@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, Command, FileText, KanbanSquare, LayoutDashboard, Loader2, LogOut, MessagesSquare, Pause, Play, Rocket, Search, Sparkles, Target, Users } from 'lucide-react'
+import { ChevronDown, Command, FileText, KanbanSquare, LayoutDashboard, Loader2, LogOut, MessagesSquare, Pause, Play, Rocket, Search, Sparkles, Target, Users, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useStore, type View } from './store/useStore'
 import { useAuth } from './store/useAuth'
 import { Avatar, cx } from './lib/ui'
@@ -53,6 +53,8 @@ export function App() {
   const logout = useAuth((s) => s.logout)
 
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [navCollapsed, setNavCollapsed] = useState(() => localStorage.getItem('navo7-nav-collapsed') === '1')
+  const toggleNav = () => setNavCollapsed((v) => { localStorage.setItem('navo7-nav-collapsed', v ? '0' : '1'); return !v })
 
   // 启动时用已存 token 校验身份
   useEffect(() => {
@@ -128,15 +130,21 @@ export function App() {
     <>
     <div className="flex h-full">
       {/* 侧边栏 */}
-      <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white">
-        <div className="flex items-center gap-2.5 px-5 py-5">
+      <aside className={cx('flex shrink-0 flex-col border-r border-slate-200 bg-white transition-[width] duration-200', navCollapsed ? 'w-[60px]' : 'w-60')}>
+        <div className={cx('flex items-center py-5', navCollapsed ? 'flex-col gap-2 px-2' : 'gap-2.5 px-5')}>
           <img src="/logo.svg" alt="Navo7" className="h-8 w-8" />
-          <div>
-            <div className="text-[15px] font-bold leading-none tracking-tight">Navo7</div>
-          </div>
+          {!navCollapsed && <div className="text-[15px] font-bold leading-none tracking-tight">Navo7</div>}
+          <button
+            onClick={toggleNav}
+            title={navCollapsed ? '展开菜单' : '收起菜单'}
+            className={cx('rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600', navCollapsed ? '' : 'ml-auto')}
+          >
+            {navCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+          </button>
         </div>
 
         {/* 项目切换 */}
+        {!navCollapsed && (
         <div className="px-3 pb-2">
           <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">当前项目</div>
           <div className="relative">
@@ -154,38 +162,54 @@ export function App() {
             <ChevronDown size={15} className="pointer-events-none absolute right-2.5 top-2.5 text-slate-400" />
           </div>
         </div>
+        )}
 
         {/* 全局搜索入口 */}
-        <div className="px-3 pb-2">
+        <div className={cx('pb-2', navCollapsed ? 'px-2' : 'px-3')}>
           <button
             onClick={() => setPaletteOpen(true)}
-            className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-400 transition hover:border-brand/40 hover:text-slate-600"
+            title="搜索"
+            className={cx('flex w-full items-center rounded-lg border border-slate-200 bg-white text-sm text-slate-400 transition hover:border-brand/40 hover:text-slate-600', navCollapsed ? 'justify-center py-2' : 'gap-2 px-3 py-2')}
           >
             <Search size={15} />
-            <span>搜索…</span>
-            <kbd className="ml-auto flex items-center gap-0.5 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium">
-              <Command size={10} /> K
-            </kbd>
+            {!navCollapsed && <>
+              <span>搜索…</span>
+              <kbd className="ml-auto flex items-center gap-0.5 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium">
+                <Command size={10} /> K
+              </kbd>
+            </>}
           </button>
         </div>
 
-        <nav className="flex-1 space-y-1 px-3">
+        <nav className={cx('flex-1 space-y-1', navCollapsed ? 'px-2' : 'px-3')}>
           {NAV.map(({ key, label, icon: Icon }) => (
             <button
               key={key}
               onClick={() => setView(key)}
+              title={navCollapsed ? label : undefined}
               className={cx(
-                'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition',
+                'flex w-full items-center rounded-lg text-sm font-medium transition',
+                navCollapsed ? 'justify-center py-2.5' : 'gap-3 px-3 py-2.5',
                 view === key ? 'bg-brand-soft text-brand' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800',
               )}
             >
               <Icon size={18} strokeWidth={2.1} />
-              {label}
+              {!navCollapsed && label}
             </button>
           ))}
         </nav>
 
         {/* 引擎状态 */}
+        {navCollapsed ? (
+          <button
+            onClick={() => toggleSim(!simRunning)}
+            title={`执行引擎 · ${simRunning ? '运行中' : '已暂停'}（${workingCount} 个在执行）`}
+            className="mx-2 mb-2 flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 py-2 text-slate-600 hover:bg-slate-100"
+          >
+            <span className={cx('h-1.5 w-1.5 rounded-full', simRunning ? 'bg-emerald-500 dot-pulse' : 'bg-slate-300')} />
+            {simRunning ? <Pause size={13} /> : <Play size={13} />}
+          </button>
+        ) : (
         <div className="mx-3 mb-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500">执行引擎</span>
@@ -203,28 +227,33 @@ export function App() {
             {simRunning ? '暂停引擎' : '启动引擎'}
           </button>
         </div>
+        )}
 
         {/* 账户 */}
-        <div className="m-3 mt-0 flex items-center gap-1">
+        <div className={cx('m-3 mt-0 flex gap-1', navCollapsed ? 'flex-col items-center' : 'items-center')}>
           <button
             onClick={() => setView('account')}
+            title={navCollapsed ? authUser.name : undefined}
             className={cx(
-              'flex min-w-0 flex-1 items-center gap-2.5 rounded-xl border p-2.5 text-left transition',
+              'flex min-w-0 items-center rounded-xl border transition',
+              navCollapsed ? 'justify-center p-1.5' : 'flex-1 gap-2.5 p-2.5 text-left',
               view === 'account' ? 'border-brand/30 bg-brand-soft' : 'border-slate-200 hover:bg-slate-50',
             )}
           >
-            <Avatar seed={authUser.avatarSeed} name={authUser.name} size={34} />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-semibold">{authUser.name}</div>
-              <div className="truncate text-[11px] text-slate-400">
-                {authUser.role === 'root' ? 'Root 账户' : authUser.memberRole ?? '成员'}
+            <Avatar seed={authUser.avatarSeed} name={authUser.name} size={navCollapsed ? 30 : 34} />
+            {!navCollapsed && (
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold">{authUser.name}</div>
+                <div className="truncate text-[11px] text-slate-400">
+                  {authUser.role === 'root' ? 'Root 账户' : authUser.memberRole ?? '成员'}
+                </div>
               </div>
-            </div>
+            )}
           </button>
           <button
             onClick={logout}
             title="登出"
-            className="shrink-0 self-stretch rounded-xl border border-slate-200 px-2 text-slate-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500"
+            className={cx('shrink-0 rounded-xl border border-slate-200 text-slate-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500', navCollapsed ? 'p-1.5' : 'self-stretch px-2')}
           >
             <LogOut size={16} />
           </button>

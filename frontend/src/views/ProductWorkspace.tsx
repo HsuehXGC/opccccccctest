@@ -12,6 +12,8 @@ import {
   ArrowRight,
   Target,
   Wrench,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { DOC_TYPE, DOC_TYPE_ORDER, PriorityBadge, cx } from '../lib/ui'
@@ -393,6 +395,8 @@ export function ProductWorkspace() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set(productReqs[0] ? [productReqs[0].id] : []))
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState<Requirement | null>(null)
+  const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem('navo7-reqs-panel') !== '0')
+  const togglePanel = () => setPanelOpen((v) => { localStorage.setItem('navo7-reqs-panel', v ? '0' : '1'); return !v })
 
   // 命令面板等跨模块跳转：定位到目标产品并展开其首条需求
   const focusProductId = useStore((s) => s.focusProductId)
@@ -464,13 +468,25 @@ export function ProductWorkspace() {
 
   return (
     <div className="flex h-full">
+      {/* 收起态：细展开条 */}
+      {!panelOpen && (
+        <button onClick={togglePanel} title="展开产品线" className="flex w-8 shrink-0 items-center justify-center border-r border-slate-200 bg-white text-slate-400 hover:bg-slate-50 hover:text-slate-600">
+          <PanelLeftOpen size={16} />
+        </button>
+      )}
       {/* 产品切换 */}
+      {panelOpen && (
       <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white">
         <div className="flex items-center justify-between px-4 py-4">
           <div className="text-xs font-bold uppercase tracking-wide text-slate-400">产品线</div>
-          <button onClick={() => setAddingProduct(true)} className="flex items-center gap-1 text-xs font-medium text-brand hover:underline">
-            <Plus size={13} /> 新建
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setAddingProduct(true)} className="flex items-center gap-1 text-xs font-medium text-brand hover:underline">
+              <Plus size={13} /> 新建
+            </button>
+            <button onClick={togglePanel} title="收起产品线" className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+              <PanelLeftClose size={15} />
+            </button>
+          </div>
         </div>
         <div className="flex-1 space-y-1 overflow-y-auto px-3">
           {products.map((p) => {
@@ -500,6 +516,7 @@ export function ProductWorkspace() {
           })}
         </div>
       </aside>
+      )}
 
       {/* 工作台 */}
       <div className="flex-1 overflow-y-auto">
