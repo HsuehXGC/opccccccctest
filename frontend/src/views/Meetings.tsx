@@ -320,6 +320,7 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
   const setMeetingStatus = useStore((s) => s.setMeetingStatus)
   const mergeMeeting = useStore((s) => s.mergeMeeting)
   const setMeetingReferences = useStore((s) => s.setMeetingReferences)
+  const removeMeeting = useStore((s) => s.removeMeeting)
 
   const [busy, setBusy] = useState(false)
   const [draft, setDraft] = useState('')
@@ -390,6 +391,52 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
       toast('会议已在云端开始，后端编排中——关页面/刷新都不影响，进度会自动刷新', 'success')
     } catch (err) {
       toast('开会失败：' + (err as Error).message, 'warn')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // 续会：在已结束会议的结论基础上，带上主持人补充，重新讨论并调整结论。
+  // 做法：把「上一轮结论 + 主持人补充」嵌进 knowledge 上下文重跑一轮（复用云端编排）。
+  async function continueMeeting() {
+    if (busy || !token) return
+    const m = cur()
+    if (!m.output?.trim()) { toast('先有结论才能续会调整', 'warn'); return }
+    const hostNotes = m.messages.filter((x) => x.speakerType === 'user').map((x) => x.content.trim()).filter(Boolean)
+    if (draft.trim()) hostNotes.push(draft.trim())
+    if (hostNotes.length === 0) { toast('先以主持人身份补充一句意见/评论，再续会', 'warn'); return }
+    setBusy(true)
+    try {
+      const continuation = [
+        '',
+        '## 续会 · 在上一轮结论基础上调整',
+        '上一轮会议已形成结论如下：',
+        m.output,
+        '',
+        '主持人补充意见 / 评论：',
+        ...hostNotes.map((n) => `- ${n}`),
+        '',
+        '请基于上一轮结论与主持人的补充，重新审视议题，收敛出**更新后的结论**；相较上一轮有变化的地方，明确说明改了什么、为什么。',
+      ].join('\n')
+      const augKnowledge = knowledge + '\n' + continuation
+      const rounds = Math.max(1, m.rounds ?? 1)
+      const turns = participants.map((bot) => ({
+        botId: bot.id, name: bot.name, role: bot.role, avatarSeed: bot.avatarSeed,
+        head: turnHead(bot, m, product, augKnowledge), tail: turnTail(bot),
+      }))
+      const nextMeeting = { ...m, priorConclusions: [...(m.priorConclusions ?? []), m.output] }
+      const payload = {
+        meeting: nextMeeting, rounds, parallel: !!m.parallel, kind: m.kind, turns,
+        roundDirectives: Array.from({ length: rounds - 1 }, (_, i) => roundDirectiveText(i + 2)),
+        pm: { head: pmHead(pm, m, product, augKnowledge, m.kind), tail: pmTail(m.kind) },
+      }
+      await authApi.runMeeting(token, meetingId, payload)
+      setMeetingStatus(meetingId, 'running')
+      mergeMeeting(meetingId, { priorConclusions: nextMeeting.priorConclusions, messages: [], output: '' })
+      setDraft('')
+      toast('续会已开始，将基于你的补充调整结论', 'success')
+    } catch (err) {
+      toast('续会失败：' + (err as Error).message, 'warn')
     } finally {
       setBusy(false)
     }
@@ -471,15 +518,36 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
               </details>
             )}
           </div>
-          {meeting.status === 'draft' && (
-            <button
-              onClick={runMeeting}
-              disabled={busy}
-              className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
-            >
-              {busy ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />} 开始会议
-            </button>
-          )}
+          <div className="flex shrink-0 items-center gap-2">
+            {meeting.status === 'draft' && (
+              <button
+                onClick={runMeeting}
+                disabled={busy}
+                className="flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+              >
+                {busy ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />} 开始会议
+              </button>
+            )}
+            {meeting.status === 'done' && (
+              <button
+                onClick={continueMeeting}
+                disabled={busy}
+                title="以主持人身份补充意见后，在当前结论基础上继续开会、调整结论"
+                className="flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+              >
+                {busy ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />} 继续开会 · 调整结论
+              </button>
+            )}
+            {meeting.status !== 'running' && (
+              <button
+                onClick={() => { if (confirm(`删除会议「${meeting.title}」？此操作不可撤销。`)) { removeMeeting(meeting.id); onBack() } }}
+                title="删除此会议"
+                className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 ring-1 ring-rose-200 transition hover:bg-rose-50"
+              >
+                <Trash2 size={15} /> 删除
+              </button>
+            )}
+          </div>
         </div>
         {/* 参会者 */}
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -558,13 +626,28 @@ function MeetingRoom({ meetingId, onBack }: { meetingId: string; onBack: () => v
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && sendUserMsg()}
-            placeholder="以主持人身份发言 / 补充背景（开始会议前发言会作为讨论背景）"
+            placeholder={meeting.status === 'done' ? '以主持人身份补充意见 / 评论，然后点右上「继续开会 · 调整结论」' : '以主持人身份发言 / 补充背景（开始会议前发言会作为讨论背景）'}
             className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
           />
           <button onClick={sendUserMsg} className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 text-sm font-medium text-slate-600 hover:bg-slate-200">
             <Send size={14} /> 发言
           </button>
         </div>
+      )}
+
+      {/* 历史结论（续会归档）：可展开对比 */}
+      {(meeting.priorConclusions?.length ?? 0) > 0 && (
+        <details className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <summary className="cursor-pointer text-[12px] font-semibold text-slate-500">历史结论 · {meeting.priorConclusions!.length} 版（续会调整前的版本）</summary>
+          <div className="mt-2 space-y-3">
+            {meeting.priorConclusions!.map((c, i) => (
+              <div key={i} className="rounded-xl bg-white p-3 ring-1 ring-slate-100">
+                <div className="mb-1 text-[11px] font-medium text-slate-400">第 {i + 1} 版</div>
+                <div className="prose prose-slate prose-sm max-w-none prose-h2:text-sm" dangerouslySetInnerHTML={{ __html: renderMarkdown(c, new Map()) }} />
+              </div>
+            ))}
+          </div>
+        </details>
       )}
 
       {/* 产品经理输出：执行计划 + 会议纪要 */}
@@ -948,7 +1031,11 @@ function MeetingListItem({ meeting, projectName, onOpen, onRemove }: { meeting: 
           </div>
         </div>
       </button>
-      <button onClick={onRemove} title="删除会议" className="shrink-0 rounded-lg p-1.5 text-slate-300 opacity-0 transition hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100">
+      <button
+        onClick={() => { if (confirm(`删除会议「${meeting.title}」？此操作不可撤销。`)) onRemove() }}
+        title="删除会议"
+        className="shrink-0 rounded-lg p-1.5 text-slate-300 opacity-0 transition hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100"
+      >
         <Trash2 size={15} />
       </button>
     </div>

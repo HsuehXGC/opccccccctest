@@ -248,6 +248,8 @@ export interface Meeting {
   messages: MeetingMessage[]
   /** 产品经理会后整理的输出（执行计划 + 会议纪要，Markdown） */
   output: string
+  /** 续会前的历史结论（每次「继续开会调整结论」把上一版 output 归档到这里） */
+  priorConclusions?: string[]
   createdAt: number
 }
 
