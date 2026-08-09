@@ -4,6 +4,7 @@ import { useStore } from '../store/useStore'
 import { useAuth } from '../store/useAuth'
 import { authApi, runExecutorStream, type LiveMachine } from '../lib/authApi'
 import { assembleSystemPrompt } from '../lib/botCharter'
+import { buildProjectKnowledge, taskDocAuthorPrompt } from '../lib/meeting'
 import { assignPrompt, parseAssignments, heuristicAssign } from '../lib/assign'
 import { toast } from '../lib/toast'
 import { Avatar, DOC_TYPE, PriorityBadge, TASK_COLUMNS, botInProject, cx } from '../lib/ui'
@@ -13,7 +14,36 @@ import type { Task, TaskKind, TaskStatus } from '../types'
 function TaskDispatch({ task }: { task: Task }) {
   const bot = useStore((s) => s.bots.find((b) => b.id === task.botId))
   const recordTaskRun = useStore((s) => s.recordTaskRun)
+  const saveDocVersion = useStore((s) => s.saveDocVersion)
+  const allProducts = useStore((s) => s.products)
+  const allRequirements = useStore((s) => s.requirements)
+  const allDocs = useStore((s) => s.docs)
+  const allTasks = useStore((s) => s.tasks)
+  const projects = useStore((s) => s.projects)
   const token = useAuth((s) => s.token)
+
+  // 「撰写文档」任务：kind=doc 且指定了目标文档 → 走文档撰写（注入产品知识），完成后写入该文档
+  const targetDoc = task.kind === 'doc' && task.targetDocSlug ? allDocs.find((d) => d.slug === task.targetDocSlug) : undefined
+  const isDocTask = !!targetDoc
+  const docProduct = targetDoc ? allProducts.find((p) => p.id === targetDoc.productId) ?? null : null
+  const docProject = docProduct ? projects.find((p) => p.id === docProduct.projectId) : undefined
+  const docKnowledge = () => {
+    const projId = docProduct?.projectId
+    const projProducts = allProducts.filter((p) => p.projectId === projId)
+    const pids = new Set(projProducts.map((p) => p.id))
+    return buildProjectKnowledge({
+      projectName: docProject?.name ?? '（未知项目）',
+      projectDesc: docProject?.description ?? '',
+      products: projProducts,
+      requirements: allRequirements.filter((r) => r.productId && pids.has(r.productId)),
+      docs: allDocs.filter((d) => pids.has(d.productId)),
+      tasks: allTasks.filter((t) => t.productId && pids.has(t.productId)),
+      focusProductId: docProduct?.id ?? null,
+      // 把本产品已有文档全文注入，让撰写者有足够背景（含会议纪要类文档）
+      fullDocSlugs: allDocs.filter((d) => d.productId === targetDoc!.productId && d.slug !== targetDoc!.slug).map((d) => d.slug),
+      includeTaskOutputs: true,
+    })
+  }
 
   const [machines, setMachines] = useState<LiveMachine[]>([])
   const [pickedExec, setPickedExec] = useState('')
@@ -38,9 +68,16 @@ function TaskDispatch({ task }: { task: Task }) {
     .filter((m) => m.online && !m.internal)
     .flatMap((m) => m.executors.map((e) => ({ ...e, machineName: m.machine.name })))
   const effectiveExec = pickedExec || executors.find((e) => e.status === 'idle')?.id || executors[0]?.id || ''
-  const fullPrompt = bot
-    ? `${assembleSystemPrompt(bot)}\n\n---\n\n# 任务：${task.title}\n\n${task.brief || task.description || '（无简报）'}`
-    : ''
+  const fullPrompt = !bot
+    ? ''
+    : isDocTask
+      ? taskDocAuthorPrompt(bot, docProduct, docKnowledge(), {
+          docTitle: targetDoc!.title,
+          docType: targetDoc!.type,
+          brief: task.brief || task.description || '',
+          existingContent: targetDoc!.versions[0]?.content,
+        })
+      : `${assembleSystemPrompt(bot)}\n\n---\n\n# 任务：${task.title}\n\n${task.brief || task.description || '（无简报）'}`
 
   async function dispatch() {
     if (!bot || !effectiveExec || !token) return
@@ -59,7 +96,23 @@ function TaskDispatch({ task }: { task: Task }) {
           setOutput(final)
           setPhase('done')
           recordTaskRun(task.id, { output: final, ok: true })
-          toast('派单执行完成，产出已回填交付物', 'success')
+          // 撰写文档任务：把产出直接写入目标文档的新版本（NEED_INPUT 时不写，提示补充）
+          if (isDocTask && targetDoc) {
+            if (/^\s*===NEED_INPUT===/.test(final)) {
+              toast('撰写者需要你补充信息（见产出），已回填任务但未写入文档', 'warn')
+            } else {
+              saveDocVersion(targetDoc.slug, {
+                content: final.trim(),
+                note: `任务撰写：${task.title}`.slice(0, 60),
+                authorBotId: bot?.id ?? null,
+                productVersion: targetDoc.versions[0]?.productVersion ?? docProduct?.currentVersion ?? 'v1.0.0',
+                status: 'draft',
+              })
+              toast(`已写入文档「${targetDoc.title}」新版本`, 'success')
+            }
+          } else {
+            toast('派单执行完成，产出已回填交付物', 'success')
+          }
         } else if (e.t === 'error') {
           setOutput((acc + '\n' + e.error).trim())
           setPhase('error')
@@ -367,8 +420,17 @@ function TaskDrawer({ taskId, onClose }: { taskId: string; onClose: () => void }
         <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
           <div className="min-w-0">
             <div className="mb-1.5 flex items-center gap-2">
-              <span className={cx('inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium', KIND[task.kind].cls)}>
-                <Kicon size={11} /> {KIND[task.kind].label}任务
+              <span className={cx('inline-flex items-center gap-1 rounded pl-1.5 text-[10px] font-medium', KIND[task.kind].cls)}>
+                <Kicon size={11} />
+                <select
+                  value={task.kind}
+                  onChange={(e) => updateTask(task.id, { kind: e.target.value as TaskKind })}
+                  title="任务类型：执行=派活/写代码；文档=向产品文档撰写指定文档"
+                  className={cx('cursor-pointer appearance-none bg-transparent py-0.5 pr-1.5 text-[10px] font-medium outline-none', KIND[task.kind].cls)}
+                >
+                  <option value="work">执行任务</option>
+                  <option value="doc">文档任务</option>
+                </select>
               </span>
               <PriorityBadge p={task.priority} />
             </div>

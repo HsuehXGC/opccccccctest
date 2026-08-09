@@ -320,6 +320,36 @@ export function docAuthorPrompt(bot: Bot, meeting: Meeting, product: Product | n
   ].join('\n')
 }
 
+/** 任务版「撰写文档」prompt：不依赖会议，把产品知识注入后让员工写指定文档。 */
+export function taskDocAuthorPrompt(
+  bot: Bot,
+  product: Product | null,
+  knowledge: string,
+  opts: { docTitle: string; docType: DocType; brief: string; existingContent?: string },
+): string {
+  const typeLabel = DOC_TYPE[opts.docType]?.label ?? opts.docType
+  return [
+    assembleSystemPrompt(bot),
+    '', '---', '',
+    product ? `# 当前产品：${product.name}（${product.currentVersion}）` : '# （未指定具体产品）',
+    '',
+    knowledge,
+    '',
+    `## 撰写任务：${opts.docTitle}（${typeLabel}）`,
+    `你负责向本产品的文档库撰写这篇「${typeLabel}」文档。撰写要求：${opts.brief || '（见标题）'}`,
+    opts.existingContent && opts.existingContent.trim()
+      ? `\n## 该文档现有内容（在此基础上完善 / 改写，非必要不要推倒重来）\n${opts.existingContent.slice(0, 6000)}`
+      : '',
+    '',
+    '要求：',
+    '- **直接输出完整文档正文**（Markdown），不要寒暄 / 复述任务 / 写「以下是…」/ 留占位符。',
+    '- **紧扣上面「背景知识库」**（已有文档、需求、任务产出、会议纪要）里的项目真实信息，不要泛泛而谈；可用 `[[slug]]` 关联其它文档。',
+    `- 结构专业、可交付：符合「${typeLabel}」这类文档应有的章节与深度。`,
+    '- 只写文档内容本身，不执行任何代码或改动。首行用 `# 标题` 开头。',
+    '- **若缺少关键信息以致无法写出可交付文档**（而非可合理假设的细节），不要编造：**只输出**一行 `===NEED_INPUT===`，紧接说明「还缺什么、需要用户补充哪些信息」，不要输出正文。',
+  ].filter(Boolean).join('\n')
+}
+
 /** 产品经理会后整理 prompt：输出执行计划 + 会议纪要 */
 export function pmConsolidatePrompt(
   pm: Bot,
