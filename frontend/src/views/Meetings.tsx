@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { Users, Plus, Play, Loader2, Send, Sparkles, Trash2, FileText, ArrowLeft, Bot as BotIcon, ClipboardList, ListPlus, AlertTriangle, Folder as FolderIcon } from 'lucide-react'
+import { Users, Plus, Play, Loader2, Send, Sparkles, Trash2, FileText, ArrowLeft, Bot as BotIcon, ClipboardList, ListPlus, AlertTriangle, Folder as FolderIcon, Globe } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useAuth } from '../store/useAuth'
 import { authApi } from '../lib/authApi'
@@ -8,6 +8,7 @@ import { buildProjectKnowledge, parseMeetingPlan, parseDocManifest, docAuthorPro
 import { renderMarkdown } from '../lib/markdown'
 import { Avatar, cx, DOC_TYPE, DOC_TYPE_ORDER } from '../lib/ui'
 import { Modal, Field, inputCls } from '../components/Modal'
+import { AiResearchModal } from '../components/AiResearchModal'
 import { toast } from '../lib/toast'
 import type { Bot, DocType, Meeting, MeetingKind, Product } from '../types'
 
@@ -928,6 +929,7 @@ export function Meetings() {
   const hasUnfiled = orgMeetings.some((m) => !m.projectId)
 
   const [creating, setCreating] = useState(false)
+  const [researching, setResearching] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
 
   // 从文档「会议出处」跳转：自动打开对应会议详情
@@ -967,6 +969,13 @@ export function Meetings() {
             {hasUnfiled && <option value="none">未归类（{orgMeetings.filter((m) => !m.projectId).length}）</option>}
           </select>
           <button
+            onClick={() => setResearching(true)}
+            title="联网调研：真搜真实公司/产品/定价/来源，查不到会说明，不编造"
+            className="flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand-soft px-3.5 py-2 text-sm font-medium text-brand hover:bg-brand/10"
+          >
+            <Globe size={16} /> AI 调研
+          </button>
+          <button
             onClick={() => setCreating(true)}
             className="flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700"
           >
@@ -974,6 +983,8 @@ export function Meetings() {
           </button>
         </div>
       </header>
+
+      {researching && <AiResearchModal onClose={() => setResearching(false)} />}
 
       {projectMeetings.length === 0 ? (
         <div className="rounded-2xl border-2 border-dashed border-slate-200 py-16 text-center">
